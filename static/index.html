@@ -308,6 +308,65 @@
             color: #999;
             font-style: italic;
         }
+
+        /* Countdown timer */
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+
+        .card-header h2 {
+            border-bottom: none;
+            padding-bottom: 0;
+            margin-bottom: 0;
+        }
+
+        .countdown {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.82em;
+            color: #888;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .countdown-bar {
+            width: 60px;
+            height: 5px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .countdown-bar-fill {
+            height: 100%;
+            background: #667eea;
+            border-radius: 3px;
+            transition: width 1s linear;
+        }
+
+        /* News links */
+        .news-link {
+            color: #333;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .news-link:hover {
+            color: #667eea;
+            text-decoration: underline;
+        }
+
+        .news-source {
+            font-size: 0.8em;
+            color: #999;
+            margin-left: 4px;
+        }
     </style>
 </head>
 <body>
@@ -337,7 +396,15 @@
             
             <!-- Market Prices -->
             <div class="card">
-                <h2>Market Prices</h2>
+                <div class="card-header">
+                    <h2>Market Prices</h2>
+                    <div class="countdown" id="priceCountdown">
+                        <span id="priceCountdownText">30s</span>
+                        <div class="countdown-bar">
+                            <div class="countdown-bar-fill" id="priceCountdownBar" style="width: 100%"></div>
+                        </div>
+                    </div>
+                </div>
                 <div class="market-prices" id="marketPrices">
                     <div class="loading">Loading market data...</div>
                 </div>
@@ -363,7 +430,15 @@
             
             <!-- News Feed -->
             <div class="card">
-                <h2>Market News & Events</h2>
+                <div class="card-header">
+                    <h2>Market News & Events</h2>
+                    <div class="countdown" id="newsCountdown">
+                        <span id="newsCountdownText">30s</span>
+                        <div class="countdown-bar">
+                            <div class="countdown-bar-fill" id="newsCountdownBar" style="width: 100%"></div>
+                        </div>
+                    </div>
+                </div>
                 <div class="news-feed" id="newsFeed">
                     <div class="loading">Loading news...</div>
                 </div>
@@ -626,12 +701,16 @@
                     <div class="log-item">
                         <div class="log-time">${new Date(news.timestamp).toLocaleString()}</div>
                         <div class="log-content">
-                            <strong>${news.title}</strong>
+                            ${news.url && news.url.startsWith('http')
+                                ? `<a class="news-link" href="${news.url}" target="_blank" rel="noopener noreferrer">${news.title}</a>`
+                                : `<strong>${news.title}</strong>`
+                            }
+                            <span class="news-source">${news.source || ''}</span>
                             <br>
                             <span class="status-badge status-${news.sentiment === 'positive' ? 'active' : news.sentiment === 'negative' ? 'stopped' : 'paused'}">
                                 ${news.sentiment.toUpperCase()}
                             </span>
-                            ${news.cryptocurrency ? ` - ${news.cryptocurrency}` : ''}
+                            ${news.cryptocurrency ? ` - ${news.cryptocurrency.toUpperCase()}` : ''}
                         </div>
                     </div>
                 `).join('');
@@ -726,18 +805,63 @@
             document.getElementById('createAgentModal').classList.remove('active');
         }
         
+        // ── Countdown Timer ──────────────────────────────────────────────
+        const REFRESH_INTERVAL = 30; // seconds
+        let priceSecondsLeft = REFRESH_INTERVAL;
+        let newsSecondsLeft = REFRESH_INTERVAL;
+
+        function updateCountdown(id, barId, secondsLeft) {
+            const textEl = document.getElementById(id);
+            const barEl = document.getElementById(barId);
+            if (textEl) textEl.textContent = `${secondsLeft}s`;
+            if (barEl) barEl.style.width = `${(secondsLeft / REFRESH_INTERVAL) * 100}%`;
+        }
+
+        function startCountdownTick() {
+            setInterval(() => {
+                priceSecondsLeft = Math.max(0, priceSecondsLeft - 1);
+                newsSecondsLeft = Math.max(0, newsSecondsLeft - 1);
+                updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft);
+                updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft);
+            }, 1000);
+        }
+
+        function resetPriceCountdown() {
+            priceSecondsLeft = REFRESH_INTERVAL;
+            updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft);
+        }
+
+        function resetNewsCountdown() {
+            newsSecondsLeft = REFRESH_INTERVAL;
+            updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft);
+        }
+
+        // ── Refresh cycle ─────────────────────────────────────────────────
+        async function refreshPrices() {
+            await loadMarketPrices();
+            resetPriceCountdown();
+        }
+
+        async function refreshNews() {
+            await loadNews();
+            resetNewsCountdown();
+        }
+
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             loadAgents();
-            loadMarketPrices();
-            loadNews();
+            refreshPrices();
+            refreshNews();
             initWebSocket();
-            
-            // Refresh data every 30 seconds
+            startCountdownTick();
+
+            // Refresh prices & news every 30 seconds
+            setInterval(refreshPrices, REFRESH_INTERVAL * 1000);
+            setInterval(refreshNews, REFRESH_INTERVAL * 1000);
+
+            // Refresh agents & selected details every 30 seconds
             setInterval(() => {
                 loadAgents();
-                loadMarketPrices();
-                loadNews();
                 if (selectedAgentId) {
                     loadAgentDetails(selectedAgentId);
                     loadTrades(selectedAgentId);
