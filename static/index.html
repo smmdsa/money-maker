@@ -367,6 +367,109 @@
             color: #999;
             margin-left: 4px;
         }
+
+        /* ── Charts Section ─────────────────────────────────────── */
+        .charts-section {
+            margin-bottom: 20px;
+        }
+
+        .chart-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .chart-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .coin-selector {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .coin-selector-btn {
+            padding: 5px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f8f9fa;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 500;
+            transition: all 0.2s;
+            color: #555;
+        }
+
+        .coin-selector-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .coin-selector-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .timeframe-selector {
+            display: flex;
+            gap: 4px;
+        }
+
+        .tf-btn {
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f8f9fa;
+            cursor: pointer;
+            font-size: 0.82em;
+            transition: all 0.2s;
+            color: #555;
+        }
+
+        .tf-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .tf-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .chart-container {
+            width: 100%;
+            position: relative;
+        }
+
+        .rsi-label {
+            font-size: 0.8em;
+            color: #999;
+            margin: 8px 0 4px 0;
+        }
+
+        /* Equity curve section */
+        .equity-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 800px) {
+            .equity-section {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -407,6 +510,45 @@
                 </div>
                 <div class="market-prices" id="marketPrices">
                     <div class="loading">Loading market data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Charts Section ─────────────────────────────────────── -->
+        <div class="charts-section">
+            <div class="chart-card">
+                <div class="chart-controls">
+                    <div class="coin-selector" id="coinSelector">
+                        <button class="coin-selector-btn active" data-coin="bitcoin" onclick="Charts.loadOHLC('bitcoin', Charts.getCurrentDays())">BTC</button>
+                        <button class="coin-selector-btn" data-coin="ethereum" onclick="Charts.loadOHLC('ethereum', Charts.getCurrentDays())">ETH</button>
+                        <button class="coin-selector-btn" data-coin="binancecoin" onclick="Charts.loadOHLC('binancecoin', Charts.getCurrentDays())">BNB</button>
+                        <button class="coin-selector-btn" data-coin="solana" onclick="Charts.loadOHLC('solana', Charts.getCurrentDays())">SOL</button>
+                        <button class="coin-selector-btn" data-coin="ripple" onclick="Charts.loadOHLC('ripple', Charts.getCurrentDays())">XRP</button>
+                        <button class="coin-selector-btn" data-coin="cardano" onclick="Charts.loadOHLC('cardano', Charts.getCurrentDays())">ADA</button>
+                        <button class="coin-selector-btn" data-coin="polkadot" onclick="Charts.loadOHLC('polkadot', Charts.getCurrentDays())">DOT</button>
+                        <button class="coin-selector-btn" data-coin="dogecoin" onclick="Charts.loadOHLC('dogecoin', Charts.getCurrentDays())">DOGE</button>
+                    </div>
+                    <div class="timeframe-selector">
+                        <button class="tf-btn" data-days="1" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 1)">1D</button>
+                        <button class="tf-btn" data-days="7" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 7)">7D</button>
+                        <button class="tf-btn active" data-days="14" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 14)">14D</button>
+                        <button class="tf-btn" data-days="30" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 30)">30D</button>
+                        <button class="tf-btn" data-days="90" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 90)">90D</button>
+                        <button class="tf-btn" data-days="365" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 365)">1Y</button>
+                    </div>
+                </div>
+                <div class="chart-container" id="candlestickChartContainer"></div>
+                <div class="rsi-label">RSI (14)</div>
+                <div class="chart-container" id="rsiChartContainer"></div>
+            </div>
+        </div>
+
+        <!-- ── Equity Curve + Agent Details Row ───────────────────── -->
+        <div class="equity-section" id="equitySection" style="display: none;">
+            <div class="chart-card">
+                <h2 style="color:#333;font-size:1.3em;margin-bottom:15px;border-bottom:2px solid #667eea;padding-bottom:10px;">📈 Agent Equity Curve</h2>
+                <div class="chart-container" id="equityChartContainer">
+                    <div class="empty">Select an agent to view equity curve</div>
                 </div>
             </div>
         </div>
@@ -465,6 +607,10 @@
         </div>
     </div>
     
+    <!-- TradingView Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="/static/charts.js"></script>
+
     <script>
         let selectedAgentId = null;
         let ws = null;
@@ -540,6 +686,13 @@
             loadAgentDetails(agentId);
             loadTrades(agentId);
             loadDecisions(agentId);
+
+            // Show equity section and load equity curve
+            const eqSection = document.getElementById('equitySection');
+            if (eqSection) eqSection.style.display = 'block';
+            if (typeof Charts !== 'undefined') {
+                Charts.loadEquity(agentId);
+            }
         }
         
         // Load agent details
@@ -854,6 +1007,12 @@
             refreshNews();
             initWebSocket();
             startCountdownTick();
+
+            // Initialize charts (pass string IDs, not DOM elements)
+            if (typeof Charts !== 'undefined') {
+                Charts.init('candlestickChartContainer', 'rsiChartContainer', 'equityChartContainer');
+                Charts.loadOHLC('bitcoin', 14);
+            }
 
             // Refresh prices & news every 30 seconds
             setInterval(refreshPrices, REFRESH_INTERVAL * 1000);

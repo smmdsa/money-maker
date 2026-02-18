@@ -25,6 +25,7 @@ class TradingAgent(Base):
     portfolio = relationship("Portfolio", back_populates="agent", cascade="all, delete-orphan")
     trades = relationship("Trade", back_populates="agent", cascade="all, delete-orphan")
     decisions = relationship("Decision", back_populates="agent", cascade="all, delete-orphan")
+    snapshots = relationship("PortfolioSnapshot", back_populates="agent", cascade="all, delete-orphan")
 
 
 class Portfolio(Base):
@@ -77,6 +78,20 @@ class Decision(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     agent = relationship("TradingAgent", back_populates="decisions")
+
+
+class PortfolioSnapshot(Base):
+    """Periodic snapshot of agent portfolio value for equity curve"""
+    __tablename__ = "portfolio_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("trading_agents.id"))
+    total_value = Column(Float)          # cash + portfolio market value
+    cash_balance = Column(Float)
+    portfolio_value = Column(Float)      # market value of holdings
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    agent = relationship("TradingAgent", back_populates="snapshots")
 
 
 class NewsEvent(Base):

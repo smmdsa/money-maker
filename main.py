@@ -12,7 +12,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from backend.database import get_db, init_db
-from backend.models.database import TradingAgent, Portfolio, Trade, Decision, NewsEvent
+from backend.models.database import TradingAgent, Portfolio, Trade, Decision, NewsEvent, PortfolioSnapshot
 from backend.services.market_data import MarketDataService
 from backend.services.trading_agent import TradingAgentService
 from backend.services.news_service import NewsService
@@ -292,6 +292,40 @@ def get_coin_data(coin: str):
     return data
 
 
+@app.get("/api/market/{coin}/ohlc")
+def get_coin_ohlc(coin: str, days: int = 14):
+    """Get OHLC candlestick data for charting"""
+    data = market_service.get_ohlc(coin, days=days)
+    if not data:
+        raise HTTPException(status_code=404, detail="No OHLC data available")
+    return [{"time": int(d["timestamp"].timestamp()), "open": d["open"],
+             "high": d["high"], "low": d["low"], "close": d["close"]} for d in data]
+
+
+@app.get("/api/market/{coin}/history")
+def get_coin_history(coin: str, days: int = 30):
+    """Get historical price data for line charts"""
+    data = market_service.get_historical_prices(coin, days=days)
+    if not data:
+        raise HTTPException(status_code=404, detail="No historical data available")
+    return [{"time": int(d["timestamp"].timestamp()), "value": d["price"]} for d in data]
+
+
+@app.get("/api/agents/{agent_id}/equity")
+def get_agent_equity(agent_id: int, db: Session = Depends(get_db)):
+    """Get equity curve data for an agent"""
+    snapshots = db.query(PortfolioSnapshot).filter(
+        PortfolioSnapshot.agent_id == agent_id
+    ).order_by(PortfolioSnapshot.timestamp.asc()).all()
+
+    return [{
+        "time": int(s.timestamp.timestamp()),
+        "value": s.total_value,
+        "cash": s.cash_balance,
+        "portfolio": s.portfolio_value
+    } for s in snapshots]
+
+
 @app.get("/api/news")
 def get_news(hours: int = 24, coin: Optional[str] = None, db: Session = Depends(get_db)):
     """Get recent news events"""
@@ -355,10 +389,26 @@ async def run_trading_cycle():
                         "decision": decision,
                         "timestamp": datetime.utcnow().isoformat()
                     })
+
+                # Record portfolio snapshot for equity curve
+                portfolio_value = 0
+                for item in agent.portfolio:
+                    price = market_service.get_coin_price(item.cryptocurrency)
+                    if price:
+                        portfolio_value += item.amount * price
+
+                snapshot = PortfolioSnapshot(
+                    agent_id=agent.id,
+                    total_value=agent.current_balance + portfolio_value,
+                    cash_balance=agent.current_balance,
+                    portfolio_value=portfolio_value
+                )
+                db.add(snapshot)
                 
             except Exception as e:
                 logger.error(f"Error processing agent {agent.id}: {e}")
-        
+
+        db.commit()
         db.close()
         
     except Exception as e:
