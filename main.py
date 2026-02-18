@@ -60,6 +60,10 @@ class AgentCreate(BaseModel):
     name: str
     initial_balance: float = 10000.0
 
+    def validate_balance(self):
+        if self.initial_balance < 50:
+            raise ValueError("Minimum initial balance is $50 USD")
+
 
 class AgentUpdate(BaseModel):
     status: Optional[str] = None
@@ -78,6 +82,9 @@ async def read_root():
 def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
     """Create a new trading agent"""
     # Check if agent name already exists
+    if agent.initial_balance < 50:
+        raise HTTPException(status_code=400, detail="Minimum initial balance is $50 USD")
+    
     existing = db.query(TradingAgent).filter(TradingAgent.name == agent.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Agent name already exists")

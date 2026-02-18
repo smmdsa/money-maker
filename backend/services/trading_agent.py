@@ -362,7 +362,7 @@ class TradingAgentService:
         
         # ── Final decision ──
         if buy_score > sell_score and buy_score >= 3 and not has_position:
-            if agent.current_balance > 100:
+            if agent.current_balance > 50:
                 confidence = min(buy_score / 8, 0.95)
                 amount_to_invest = min(agent.current_balance * 0.1, max_investment)
                 
