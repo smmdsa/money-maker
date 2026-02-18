@@ -262,16 +262,18 @@ def get_agent_decisions(agent_id: int, limit: int = 50, db: Session = Depends(ge
 
 @app.get("/api/market/prices")
 def get_market_prices():
-    """Get current market prices"""
+    """Get current market prices for all supported coins"""
+    # Use batch endpoint — single API call for all coins
+    result = market_service.get_all_market_data()
+    if result:
+        return result
+    
+    # Fallback: build from individual prices
     prices = market_service.get_current_prices()
-    result = []
-    
-    for coin, price in prices.items():
-        market_data = market_service.get_market_data(coin)
-        if market_data:
-            result.append(market_data)
-    
-    return result
+    return [
+        {"id": coin, "current_price": price, "symbol": coin[:3].upper()}
+        for coin, price in prices.items()
+    ]
 
 
 @app.get("/api/market/{coin}")
@@ -326,8 +328,8 @@ async def run_trading_cycle():
     try:
         db = next(get_db())
         
-        # Generate some news
-        news_service.generate_simulated_news(db)
+        # Fetch real news from APIs
+        news_service.fetch_and_store_news(db)
         
         # Get all active agents
         agents = db.query(TradingAgent).filter(TradingAgent.status == "active").all()
@@ -354,6 +356,16 @@ async def run_trading_cycle():
         
     except Exception as e:
         logger.error(f"Error in trading cycle: {e}")
+
+
+@app.get("/api/health")
+def health_check():
+    """Check API and service health"""
+    return {
+        "status": "ok",
+        "market_service": market_service.health_check(),
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 
 @app.on_event("startup")
@@ -384,4 +396,4 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
