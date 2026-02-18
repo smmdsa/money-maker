@@ -272,15 +272,17 @@ def get_market_prices():
     """Get current market prices for all supported coins"""
     # Use batch endpoint — single API call for all coins
     result = market_service.get_all_market_data()
+    provider = market_service.get_provider()
+
     if result:
-        return result
+        return {"provider": provider, "data": result}
     
     # Fallback: build from individual prices
     prices = market_service.get_current_prices()
-    return [
+    return {"provider": provider, "data": [
         {"id": coin, "current_price": price, "symbol": coin[:3].upper()}
         for coin, price in prices.items()
-    ]
+    ]}
 
 
 @app.get("/api/market/{coin}")

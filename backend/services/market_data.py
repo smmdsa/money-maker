@@ -1,7 +1,7 @@
 """
 Market data service - fetches real cryptocurrency prices from multiple API providers
-Primary: CoinGecko (10 req/min free tier)
-Fallback: CoinCap.io (200 req/min, no key required)
+Primary: Binance (1200 req/min, no key required)
+Fallback: CoinGecko (10 req/min free tier)
 """
 import requests
 import logging
@@ -251,7 +251,10 @@ class BinanceProvider:
 # ── Main Market Data Service ─────────────────────────────────────────────
 
 class MarketDataService:
-    """Service to fetch real cryptocurrency market data with multi-provider fallback."""
+    """Service to fetch real cryptocurrency market data.
+    Primary: Binance (1200 req/min, no key)
+    Fallback: CoinGecko (10 req/min free tier)
+    """
 
     PRICES_TTL = 60
     MARKET_DATA_TTL = 120
@@ -259,24 +262,25 @@ class MarketDataService:
     TRENDING_TTL = 600
 
     def __init__(self):
-        self.base_url = "https://api.coingecko.com/api/v3"
+        self._coingecko_url = "https://api.coingecko.com/api/v3"
         self.supported_coins = [
             "bitcoin", "ethereum", "binancecoin", "cardano",
             "solana", "ripple", "polkadot", "dogecoin"
         ]
         self._cache: Dict[str, CacheEntry] = {}
-        self._rate_limiter = RateLimiter(max_calls=10, period=60)
-        self._session = requests.Session()
-        self._session.headers.update({
+        self._cg_rate_limiter = RateLimiter(max_calls=10, period=60)
+        self._cg_session = requests.Session()
+        self._cg_session.headers.update({
             "Accept": "application/json",
             "User-Agent": "MoneyMaker/1.0"
         })
         self._consecutive_failures = 0
         self._max_retries = 3
         self._last_known_prices: Dict[str, float] = {}
-        self._coingecko_blocked_until: float = 0  # timestamp when CG block expires
+        self._coingecko_blocked_until: float = 0
+        self._current_provider: str = "Binance"
 
-        # Fallback provider
+        # Primary provider
         self._binance = BinanceProvider()
 
     # ── Cache helpers ─────────────────────────────────────────────────────
@@ -300,20 +304,20 @@ class MarketDataService:
 
     # ── Core API request with retry + rate‑limiting ───────────────────────
 
-    def _api_request(self, endpoint: str, params: dict = None, timeout: int = 15) -> Optional[dict]:
-        """Make a CoinGecko API request. Returns None if blocked or failed."""
+    def _cg_api_request(self, endpoint: str, params: dict = None, timeout: int = 15) -> Optional[dict]:
+        """Make a CoinGecko API request (fallback). Returns None if blocked or failed."""
         if self._is_coingecko_blocked():
             return None
 
-        url = f"{self.base_url}{endpoint}"
+        url = f"{self._coingecko_url}{endpoint}"
 
         for attempt in range(self._max_retries):
             # Check rate limiter — returns False if we'd wait too long
-            if not self._rate_limiter.wait_if_needed():
+            if not self._cg_rate_limiter.wait_if_needed():
                 return None
 
             try:
-                response = self._session.get(url, params=params, timeout=timeout)
+                response = self._cg_session.get(url, params=params, timeout=timeout)
 
                 if response.status_code == 429:
                     retry_after = int(response.headers.get("Retry-After", 60))
@@ -359,39 +363,40 @@ class MarketDataService:
     # ── Prices ────────────────────────────────────────────────────────────
 
     def get_current_prices(self) -> Dict[str, float]:
-        """Get current USD prices for all supported coins (with fallback)."""
+        """Get current USD prices for all supported coins."""
         cached = self._get_cache("prices")
         if cached:
             return cached
 
-        # Try CoinGecko first
-        data = self._api_request("/simple/price", params={
+        # Primary: Binance
+        prices = self._binance.get_prices(self.supported_coins)
+        if prices:
+            self._current_provider = "Binance"
+            for coin, price in prices.items():
+                self._last_known_prices[coin] = price
+            self._set_cache("prices", prices, self.PRICES_TTL)
+            return prices
+
+        # Fallback: CoinGecko
+        logger.info("Falling back to CoinGecko for prices")
+        data = self._cg_api_request("/simple/price", params={
             "ids": ",".join(self.supported_coins),
             "vs_currencies": "usd"
         })
-
         if data:
             prices = {}
             for coin in self.supported_coins:
                 if coin in data and "usd" in data[coin]:
                     prices[coin] = data[coin]["usd"]
                     self._last_known_prices[coin] = data[coin]["usd"]
-
             if prices:
+                self._current_provider = "CoinGecko"
                 self._set_cache("prices", prices, self.PRICES_TTL)
                 return prices
 
-        # Fallback: Binance
-        logger.info("Falling back to Binance for prices")
-        prices = self._binance.get_prices(self.supported_coins)
-        if prices:
-            for coin, price in prices.items():
-                self._last_known_prices[coin] = price
-            self._set_cache("prices", prices, self.PRICES_TTL)
-            return prices
-
         # Last resort: cached prices
         if self._last_known_prices:
+            self._current_provider = "Cache"
             logger.warning("Using last known prices as fallback")
             return dict(self._last_known_prices)
 
@@ -406,21 +411,32 @@ class MarketDataService:
     # ── Market Data ───────────────────────────────────────────────────────
 
     def get_all_market_data(self) -> List[Dict]:
-        """Get market data for all supported coins (with fallback)."""
+        """Get market data for all supported coins."""
         cache_key = "market_data_all"
         cached = self._get_cache(cache_key)
         if cached:
             return cached
 
-        # Try CoinGecko
-        data = self._api_request("/coins/markets", params={
+        # Primary: Binance
+        result = self._binance.get_market_data(self.supported_coins)
+        if result:
+            self._current_provider = "Binance"
+            self._set_cache(cache_key, result, self.MARKET_DATA_TTL)
+            for entry in result:
+                if entry["current_price"]:
+                    self._last_known_prices[entry["id"]] = entry["current_price"]
+                self._set_cache(f"market_data_{entry['id']}", entry, self.MARKET_DATA_TTL)
+            return result
+
+        # Fallback: CoinGecko
+        logger.info("Falling back to CoinGecko for market data")
+        data = self._cg_api_request("/coins/markets", params={
             "vs_currency": "usd",
             "ids": ",".join(self.supported_coins),
             "order": "market_cap_desc",
             "sparkline": "false",
             "price_change_percentage": "24h,7d"
         })
-
         if data:
             result = []
             for coin in data:
@@ -443,24 +459,14 @@ class MarketDataService:
                     self._last_known_prices[entry["id"]] = entry["current_price"]
                 result.append(entry)
 
+            self._current_provider = "CoinGecko"
             self._set_cache(cache_key, result, self.MARKET_DATA_TTL)
             for entry in result:
-                self._set_cache(f"market_data_{entry['id']}", entry, self.MARKET_DATA_TTL)
-            return result
-
-        # Fallback: Binance
-        logger.info("Falling back to Binance for market data")
-        result = self._binance.get_market_data(self.supported_coins)
-        if result:
-            self._set_cache(cache_key, result, self.MARKET_DATA_TTL)
-            for entry in result:
-                if entry["current_price"]:
-                    self._last_known_prices[entry["id"]] = entry["current_price"]
                 self._set_cache(f"market_data_{entry['id']}", entry, self.MARKET_DATA_TTL)
             return result
 
         logger.warning("Failed to fetch market data from any provider")
-        return []
+        return {}
 
     def get_market_data(self, coin: str) -> Optional[Dict]:
         """Get detailed market data for a single coin."""
@@ -474,7 +480,7 @@ class MarketDataService:
             if entry["id"] == coin:
                 return entry
 
-        data = self._api_request(f"/coins/{coin}", params={
+        data = self._cg_api_request(f"/coins/{coin}", params={
             "localization": "false",
             "tickers": "false",
             "community_data": "false",
@@ -521,19 +527,25 @@ class MarketDataService:
     # ── Historical Prices ─────────────────────────────────────────────────
 
     def get_historical_prices(self, coin: str, days: int = 30) -> List[Dict]:
-        """Get historical price data (with fallback)."""
+        """Get historical price data."""
         cache_key = f"historical_{coin}_{days}"
         cached = self._get_cache(cache_key)
         if cached:
             return cached
 
-        # Try CoinGecko
-        data = self._api_request(f"/coins/{coin}/market_chart", params={
+        # Primary: Binance
+        prices = self._binance.get_historical_prices(coin, days)
+        if prices:
+            self._set_cache(cache_key, prices, self.HISTORICAL_TTL)
+            return prices
+
+        # Fallback: CoinGecko
+        logger.info(f"Falling back to CoinGecko for historical data ({coin})")
+        data = self._cg_api_request(f"/coins/{coin}/market_chart", params={
             "vs_currency": "usd",
             "days": days,
             "interval": "daily" if days > 1 else "hourly"
         })
-
         if data and "prices" in data:
             prices = []
             for price_data in data["prices"]:
@@ -541,17 +553,9 @@ class MarketDataService:
                     "timestamp": datetime.fromtimestamp(price_data[0] / 1000),
                     "price": price_data[1]
                 })
-
             if prices:
                 self._set_cache(cache_key, prices, self.HISTORICAL_TTL)
                 return prices
-
-        # Fallback: Binance
-        logger.info(f"Falling back to Binance for historical data ({coin})")
-        prices = self._binance.get_historical_prices(coin, days)
-        if prices:
-            self._set_cache(cache_key, prices, self.HISTORICAL_TTL)
-            return prices
 
         logger.warning(f"Failed to fetch historical prices for {coin}")
         return []
@@ -565,11 +569,18 @@ class MarketDataService:
         if cached:
             return cached
 
-        data = self._api_request(f"/coins/{coin}/ohlc", params={
+        # Primary: Binance klines (real OHLC data)
+        ohlc = self._binance.get_ohlc(coin, days)
+        if ohlc:
+            self._set_cache(cache_key, ohlc, self.HISTORICAL_TTL)
+            return ohlc
+
+        # Fallback: CoinGecko
+        logger.info(f"Falling back to CoinGecko for OHLC data ({coin})")
+        data = self._cg_api_request(f"/coins/{coin}/ohlc", params={
             "vs_currency": "usd",
             "days": days
         })
-
         if data:
             ohlc = []
             for candle in data:
@@ -580,17 +591,9 @@ class MarketDataService:
                     "low": candle[3],
                     "close": candle[4]
                 })
-
             if ohlc:
                 self._set_cache(cache_key, ohlc, self.HISTORICAL_TTL)
                 return ohlc
-
-        # Fallback: Binance klines (real OHLC data)
-        logger.info(f"Falling back to Binance for OHLC data ({coin})")
-        ohlc = self._binance.get_ohlc(coin, days)
-        if ohlc:
-            self._set_cache(cache_key, ohlc, self.HISTORICAL_TTL)
-            return ohlc
 
         logger.warning(f"Failed to fetch OHLC data for {coin} from any provider")
         return []
@@ -603,7 +606,7 @@ class MarketDataService:
         if cached:
             return cached
 
-        data = self._api_request("/search/trending")
+        data = self._cg_api_request("/search/trending")
 
         if data:
             trending = []
@@ -623,21 +626,27 @@ class MarketDataService:
 
     # ── Health Check ──────────────────────────────────────────────────────
 
+    def get_provider(self) -> str:
+        """Return the name of the currently active provider."""
+        return self._current_provider
+
     def health_check(self) -> Dict:
         """Check API connectivity and return status"""
-        cg_blocked = self._is_coingecko_blocked()
+        # Quick Binance check (primary)
+        binance_ok = bool(self._binance.get_prices(["bitcoin"]))
 
+        cg_blocked = self._is_coingecko_blocked()
         if not cg_blocked:
-            data = self._api_request("/ping")
+            data = self._cg_api_request("/ping")
             cg_ok = data is not None
         else:
             cg_ok = False
 
         return {
-            "status": "ok" if cg_ok or self._last_known_prices else "degraded",
+            "status": "ok" if binance_ok or cg_ok or self._last_known_prices else "degraded",
+            "binance": "ok" if binance_ok else "down",
             "coingecko": "ok" if cg_ok else ("blocked" if cg_blocked else "down"),
-            "binance_fallback": "available",
             "consecutive_failures": self._consecutive_failures,
             "cache_entries": len(self._cache),
-            "provider": "CoinGecko" if cg_ok else "Binance (fallback)"
+            "provider": self._current_provider
         }

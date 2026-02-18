@@ -501,10 +501,13 @@
             <div class="card">
                 <div class="card-header">
                     <h2>Market Prices</h2>
-                    <div class="countdown" id="priceCountdown">
-                        <span id="priceCountdownText">30s</span>
-                        <div class="countdown-bar">
-                            <div class="countdown-bar-fill" id="priceCountdownBar" style="width: 100%"></div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span id="dataSourceBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:#e3f2fd;color:#1565c0;font-weight:600;white-space:nowrap;"></span>
+                        <div class="countdown" id="priceCountdown">
+                            <span id="priceCountdownText">30s</span>
+                            <div class="countdown-bar">
+                                <div class="countdown-bar-fill" id="priceCountdownBar" style="width: 100%"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -817,7 +820,19 @@
         async function loadMarketPrices() {
             try {
                 const response = await fetch('/api/market/prices');
-                const prices = await response.json();
+                const json = await response.json();
+
+                // Support both formats: {provider, data} or plain array
+                const prices = json.data || json;
+                const provider = json.provider || 'Unknown';
+
+                // Update data source badge
+                const badge = document.getElementById('dataSourceBadge');
+                if (badge) {
+                    badge.textContent = `via ${provider}`;
+                    badge.style.background = provider === 'Binance' ? '#fff3e0' : '#e3f2fd';
+                    badge.style.color = provider === 'Binance' ? '#e65100' : '#1565c0';
+                }
                 
                 const marketPrices = document.getElementById('marketPrices');
                 
