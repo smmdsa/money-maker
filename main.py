@@ -49,8 +49,8 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Error broadcasting to WebSocket: {e}")
 
 manager = ConnectionManager()
 

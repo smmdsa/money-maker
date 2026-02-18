@@ -163,12 +163,13 @@ class TradingAgentService:
         
         if has_position:
             # Check for profit-taking or stop-loss
-            profit_pct = ((current_price - portfolio_item.avg_buy_price) / portfolio_item.avg_buy_price * 100)
-            
-            if profit_pct > 10:  # Take profit at 10%
-                sell_score += 3
-            elif profit_pct < -5:  # Stop loss at -5%
-                sell_score += 2
+            if portfolio_item.avg_buy_price > 0:
+                profit_pct = ((current_price - portfolio_item.avg_buy_price) / portfolio_item.avg_buy_price * 100)
+                
+                if profit_pct > 10:  # Take profit at 10%
+                    sell_score += 3
+                elif profit_pct < -5:  # Stop loss at -5%
+                    sell_score += 2
         
         # Risk management - don't invest more than 20% in single coin
         max_investment = agent.current_balance * 0.2

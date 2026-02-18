@@ -34,7 +34,7 @@ class MarketDataService:
         """Get current prices for supported cryptocurrencies"""
         try:
             # Cache for 30 seconds to avoid API rate limits
-            if self._cache_timestamp and (datetime.now() - self._cache_timestamp).seconds < 30:
+            if self._cache_timestamp and (datetime.now() - self._cache_timestamp).total_seconds() < 30:
                 return self._price_cache
             
             # Try real API first
@@ -91,7 +91,7 @@ class MarketDataService:
             import random
             return {
                 "id": coin,
-                "symbol": coin[:3].upper() if coin else "UNK",
+                "symbol": coin[:3].upper() if len(coin) >= 3 else coin.upper(),
                 "name": coin.capitalize(),
                 "current_price": current_price * (1 + random.uniform(-0.02, 0.02)),
                 "market_cap": current_price * 1000000000,
