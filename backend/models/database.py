@@ -1,0 +1,94 @@
+"""
+Database models for the trading application
+"""
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+Base = declarative_base()
+
+
+class TradingAgent(Base):
+    """AI Trading Agent model"""
+    __tablename__ = "trading_agents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    initial_balance = Column(Float)
+    current_balance = Column(Float)
+    status = Column(String, default="active")  # active, paused, stopped
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    portfolio = relationship("Portfolio", back_populates="agent", cascade="all, delete-orphan")
+    trades = relationship("Trade", back_populates="agent", cascade="all, delete-orphan")
+    decisions = relationship("Decision", back_populates="agent", cascade="all, delete-orphan")
+
+
+class Portfolio(Base):
+    """Portfolio holdings for each agent"""
+    __tablename__ = "portfolio"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("trading_agents.id"))
+    cryptocurrency = Column(String)  # e.g., "bitcoin", "ethereum"
+    symbol = Column(String)  # e.g., "BTC", "ETH"
+    amount = Column(Float)
+    avg_buy_price = Column(Float)
+    current_price = Column(Float)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    agent = relationship("TradingAgent", back_populates="portfolio")
+
+
+class Trade(Base):
+    """Trade history"""
+    __tablename__ = "trades"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("trading_agents.id"))
+    cryptocurrency = Column(String)
+    symbol = Column(String)
+    trade_type = Column(String)  # buy, sell
+    amount = Column(Float)
+    price = Column(Float)
+    total_value = Column(Float)
+    profit_loss = Column(Float, default=0.0)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    agent = relationship("TradingAgent", back_populates="trades")
+
+
+class Decision(Base):
+    """AI decision log"""
+    __tablename__ = "decisions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("trading_agents.id"))
+    decision_type = Column(String)  # analysis, trade, hold
+    cryptocurrency = Column(String)
+    reasoning = Column(String)
+    indicators = Column(JSON)  # Technical indicators used
+    news_considered = Column(JSON, nullable=True)  # News events considered
+    action_taken = Column(String)  # buy, sell, hold
+    confidence = Column(Float)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    agent = relationship("TradingAgent", back_populates="decisions")
+
+
+class NewsEvent(Base):
+    """News and market events"""
+    __tablename__ = "news_events"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String)
+    description = Column(String, nullable=True)
+    source = Column(String)
+    cryptocurrency = Column(String, nullable=True)
+    sentiment = Column(String)  # positive, negative, neutral
+    impact_score = Column(Float, default=0.0)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    url = Column(String, nullable=True)
