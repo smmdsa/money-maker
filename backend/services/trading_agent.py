@@ -120,12 +120,24 @@ class TradingAgentService:
         """Update trailing stop-loss based on price extreme.
         Returns True if SL was moved (for logging purposes).
         DRY: called by both _check_position (60s) and _risk_check_position (5s).
+
+        Two-phase trailing (inspired by Ed Seykota / Turtle Traders):
+          Phase 1 — Breakeven: once price moves +1× SL distance from entry,
+                    move SL to entry price (risk-free trade).
+          Phase 2 — Chandelier: trail SL at K×ATR from best price seen.
         """
         trail_pct = getattr(pos, 'trailing_stop_pct', 0) or 0
         if trail_pct <= 0 or current_price <= 0:
             return False
 
-        extreme = getattr(pos, 'price_extreme', 0) or pos.avg_buy_price
+        entry = pos.avg_buy_price
+        if entry <= 0:
+            return False
+
+        # Determine initial SL distance (the "1R" risk unit)
+        initial_sl_dist_pct = abs(entry - pos.stop_loss_price) / entry * 100 if pos.stop_loss_price > 0 else trail_pct
+
+        extreme = getattr(pos, 'price_extreme', 0) or entry
         moved = False
 
         if pos.position_type == "long":
@@ -133,31 +145,57 @@ class TradingAgentService:
             if current_price > extreme:
                 pos.price_extreme = current_price
                 extreme = current_price
-            # Recalculate trailing SL — only moves UP
-            new_sl = extreme * (1 - trail_pct / 100)
-            if new_sl > pos.stop_loss_price:
+
+            # Phase 1: Breakeven — at +1R, move SL to entry
+            breakeven_price = entry * (1 + initial_sl_dist_pct / 100)
+            if extreme >= breakeven_price and pos.stop_loss_price < entry:
                 logger.debug(
-                    f"Trailing SL ↑ {pos.cryptocurrency}: "
-                    f"${pos.stop_loss_price:.2f} → ${new_sl:.2f} "
-                    f"(peak ${extreme:.2f})"
+                    f"Trailing Phase 1 (breakeven) ↑ {pos.cryptocurrency}: "
+                    f"${pos.stop_loss_price:.2f} → ${entry:.2f}"
                 )
-                pos.stop_loss_price = new_sl
+                pos.stop_loss_price = entry
                 moved = True
+
+            # Phase 2: Chandelier — trail at ATR distance from peak
+            activation_price = entry * (1 + trail_pct / 100)
+            if extreme >= activation_price:
+                new_sl = extreme * (1 - trail_pct / 100)
+                if new_sl > pos.stop_loss_price:
+                    logger.debug(
+                        f"Trailing Phase 2 (chandelier) ↑ {pos.cryptocurrency}: "
+                        f"${pos.stop_loss_price:.2f} → ${new_sl:.2f} "
+                        f"(peak ${extreme:.2f})"
+                    )
+                    pos.stop_loss_price = new_sl
+                    moved = True
         else:  # short
             # Update extreme (lowest price seen)
             if extreme == 0 or current_price < extreme:
                 pos.price_extreme = current_price
                 extreme = current_price
-            # Recalculate trailing SL — only moves DOWN
-            new_sl = extreme * (1 + trail_pct / 100)
-            if pos.stop_loss_price <= 0 or new_sl < pos.stop_loss_price:
+
+            # Phase 1: Breakeven — at +1R, move SL to entry
+            breakeven_price = entry * (1 - initial_sl_dist_pct / 100)
+            if extreme <= breakeven_price and (pos.stop_loss_price <= 0 or pos.stop_loss_price > entry):
                 logger.debug(
-                    f"Trailing SL ↓ {pos.cryptocurrency}: "
-                    f"${pos.stop_loss_price:.2f} → ${new_sl:.2f} "
-                    f"(low ${extreme:.2f})"
+                    f"Trailing Phase 1 (breakeven) ↓ {pos.cryptocurrency}: "
+                    f"${pos.stop_loss_price:.2f} → ${entry:.2f}"
                 )
-                pos.stop_loss_price = new_sl
+                pos.stop_loss_price = entry
                 moved = True
+
+            # Phase 2: Chandelier — trail at ATR distance from low
+            activation_price = entry * (1 - trail_pct / 100)
+            if extreme <= activation_price:
+                new_sl = extreme * (1 + trail_pct / 100)
+                if pos.stop_loss_price <= 0 or new_sl < pos.stop_loss_price:
+                    logger.debug(
+                        f"Trailing Phase 2 (chandelier) ↓ {pos.cryptocurrency}: "
+                        f"${pos.stop_loss_price:.2f} → ${new_sl:.2f} "
+                        f"(low ${extreme:.2f})"
+                    )
+                    pos.stop_loss_price = new_sl
+                    moved = True
 
         return moved
 
@@ -564,8 +602,8 @@ class TradingAgentService:
             liquidation_price=liq_price,
             stop_loss_price=sl_price,
             take_profit_price=tp_price,
-            trailing_stop_pct=signal.stop_loss_pct,   # trail distance = initial SL %
-            price_extreme=current_price,               # starts at entry price
+            trailing_stop_pct=(signal.trail_pct or signal.stop_loss_pct) if getattr(agent, 'trailing_enabled', True) else 0,
+            price_extreme=current_price if getattr(agent, 'trailing_enabled', True) else 0,
         )
         db.add(portfolio_item)
 

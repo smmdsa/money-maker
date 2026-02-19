@@ -248,6 +248,7 @@ class Backtester:
         period_days: int = 90,
         leverage: int = 0,        # 0 = use strategy default
         initial_balance: float = 10000.0,
+        trailing_enabled: bool = True,
     ) -> BacktestResult:
         """Execute a full backtest and return results."""
 
@@ -359,7 +360,7 @@ class Backtester:
                 if signal.confidence >= cfg.min_confidence:
                     result = self._open_position(
                         signal, close, leverage, strategy_key,
-                        balance, ts, trades
+                        balance, ts, trades, trailing_enabled
                     )
                     if result:
                         position, open_fee = result
@@ -551,6 +552,7 @@ class Backtester:
         self, signal: Signal, price: float, leverage: int,
         strategy_key: str, balance: float, ts: str,
         trades: List[BacktestTrade],
+        trailing_enabled: bool = True,
     ) -> Optional[tuple]:
         """Open a simulated position. Returns (Position, fee) or None."""
         margin = calculate_position_size(
@@ -596,7 +598,7 @@ class Backtester:
             liquidation=liq,
             initial_sl=sl,
             best_price=price,
-            trail_pct=signal.stop_loss_pct,   # trailing distance = initial SL %
+            trail_pct=(signal.trail_pct or signal.stop_loss_pct) if trailing_enabled else 0,
             opened_at=ts,
         )
         return pos, open_fee
@@ -605,25 +607,53 @@ class Backtester:
     def _update_trailing_stop(pos: _Position, high: float, low: float) -> bool:
         """Update trailing stop based on candle high/low.
         Returns True if SL was moved. DRY: mirrors live _update_trailing_stops().
+
+        Two-phase trailing (Ed Seykota / Turtle Traders):
+          Phase 1 — Breakeven: at +1R from entry, move SL to entry price.
+          Phase 2 — Chandelier: trail SL at trail_pct from best price.
         """
         if pos.trail_pct <= 0:
             return False
+
+        # 1R = initial SL distance
+        initial_sl_dist = abs(pos.entry_price - pos.initial_sl) if pos.initial_sl > 0 else pos.entry_price * pos.trail_pct / 100
+        initial_sl_dist_pct = initial_sl_dist / pos.entry_price * 100 if pos.entry_price > 0 else pos.trail_pct
 
         moved = False
         if pos.direction == "long":
             if high > pos.best_price:
                 pos.best_price = high
-            new_sl = pos.best_price * (1 - pos.trail_pct / 100)
-            if new_sl > pos.stop_loss:
-                pos.stop_loss = new_sl
+
+            # Phase 1: Breakeven at +1R
+            breakeven_trigger = pos.entry_price + initial_sl_dist
+            if pos.best_price >= breakeven_trigger and pos.stop_loss < pos.entry_price:
+                pos.stop_loss = pos.entry_price
                 moved = True
+
+            # Phase 2: Chandelier trail from peak
+            activation_price = pos.entry_price * (1 + pos.trail_pct / 100)
+            if pos.best_price >= activation_price:
+                new_sl = pos.best_price * (1 - pos.trail_pct / 100)
+                if new_sl > pos.stop_loss:
+                    pos.stop_loss = new_sl
+                    moved = True
         else:  # short
             if pos.best_price == 0 or low < pos.best_price:
                 pos.best_price = low
-            new_sl = pos.best_price * (1 + pos.trail_pct / 100)
-            if pos.stop_loss <= 0 or new_sl < pos.stop_loss:
-                pos.stop_loss = new_sl
+
+            # Phase 1: Breakeven at +1R
+            breakeven_trigger = pos.entry_price - initial_sl_dist
+            if pos.best_price <= breakeven_trigger and (pos.stop_loss <= 0 or pos.stop_loss > pos.entry_price):
+                pos.stop_loss = pos.entry_price
                 moved = True
+
+            # Phase 2: Chandelier trail from low
+            activation_price = pos.entry_price * (1 - pos.trail_pct / 100)
+            if pos.best_price <= activation_price:
+                new_sl = pos.best_price * (1 + pos.trail_pct / 100)
+                if pos.stop_loss <= 0 or new_sl < pos.stop_loss:
+                    pos.stop_loss = new_sl
+                    moved = True
         return moved
 
     def _check_position_exit(

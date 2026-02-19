@@ -50,7 +50,8 @@ STRATEGY_NAMES = {
 
 def run_backtest(strategy: str, coin: str, period: int,
                  leverage: int = 10, balance: float = 100,
-                 base_url: str = BASE_URL) -> dict | None:
+                 base_url: str = BASE_URL,
+                 trailing_enabled: bool = True) -> dict | None:
     """Ejecuta un backtest y retorna el resultado."""
     payload = json.dumps({
         "strategy": strategy,
@@ -58,6 +59,7 @@ def run_backtest(strategy: str, coin: str, period: int,
         "period_days": period,
         "leverage": leverage,
         "initial_balance": balance,
+        "trailing_enabled": trailing_enabled,
     }).encode()
 
     req = urllib.request.Request(
@@ -117,6 +119,10 @@ def print_result(r: dict, strategy: str, coin: str, period: int):
 
     alpha = ret - bh
 
+    # Trailing stop stats
+    trail_moves = r.get("trailing_stops_moved", 0)
+    trail_closes = r.get("trailing_sl_closes", 0)
+
     print(f"  ┌─ {name} | {coin_label} | {period}d")
     print(f"  │ Gross:  {format_pct(ret_gross)}  (${final_gross:.2f})")
     print(f"  │ Net:    {format_pct(ret)}  (${final:.2f})  vs B&H: {format_pct(bh)}  Alpha: {format_pct(alpha)}")
@@ -124,6 +130,7 @@ def print_result(r: dict, strategy: str, coin: str, period: int):
     print(f"  │ Trades: {trades}  (W:{tp_count} L:{sl_count})")
     print(f"  │ WR: {wr:.1f}%  |  PF: {pf:.2f}  |  R:R: {rr:.2f}  |  Sharpe: {sharpe:.2f}")
     print(f"  │ Max DD: {dd:.1f}%")
+    print(f"  │ Trailing: {trail_moves} SL moves, {trail_closes} trailing closes")
     print(f"  └{'─' * 60}")
 
 
@@ -135,8 +142,9 @@ def print_compare_table(results: list[dict]):
     # Header
     print()
     print(f"  {'Strategy':<20} {'Coin':<6} {'Days':>4}  {'Gross':>8}  {'Net':>8}  "
-          f"{'Fees':>6}  {'B&H':>8}  {'Alpha':>8}  {'Trd':>4}  {'WR':>4}  {'PF':>5}  {'DD':>5}")
-    print(f"  {'─' * 105}")
+          f"{'Fees':>6}  {'B&H':>8}  {'Alpha':>8}  {'Trd':>4}  {'WR':>4}  {'PF':>5}  {'DD':>5}  "
+          f"{'Trail':>5}  {'TrCl':>4}")
+    print(f"  {'─' * 120}")
 
     for entry in results:
         r = entry["result"]
@@ -154,6 +162,8 @@ def print_compare_table(results: list[dict]):
         pf = r.get("profit_factor", 0)
         dd = r.get("max_drawdown_pct", 0)
         fees = r.get("total_fees", 0)
+        trail_moves = r.get("trailing_stops_moved", 0)
+        trail_closes = r.get("trailing_sl_closes", 0)
 
         # Color del return
         ret_s = f"{ret:+.1f}%"
@@ -176,14 +186,21 @@ def print_compare_table(results: list[dict]):
 
         print(f"  {name:<20} {c:<6} {p:>4}  {gross_c}  {ret_c}  "
               f"${fees:>5.1f}  {bh:>+7.1f}%  "
-              f"{alpha_c}  {trades:>4}  {wr:>3.0f}%  {pf:>5.2f}  {dd:>4.1f}%")
+              f"{alpha_c}  {trades:>4}  {wr:>3.0f}%  {pf:>5.2f}  {dd:>4.1f}%  "
+              f"{trail_moves:>5}  {trail_closes:>4}")
 
-    print(f"  {'─' * 105}")
+    print(f"  {'─' * 120}")
 
     # Resumen
     best = max(results, key=lambda x: x["result"].get("total_return_pct", -999))
     worst = min(results, key=lambda x: x["result"].get("total_return_pct", 999))
     avg_ret = sum(r["result"].get("total_return_pct", 0) for r in results) / len(results)
+
+    # Trailing stats totals
+    total_trail_moves = sum(r["result"].get("trailing_stops_moved", 0) for r in results)
+    total_trail_closes = sum(r["result"].get("trailing_sl_closes", 0) for r in results)
+    total_all_closes = sum(r["result"].get("total_trades", 0) for r in results)
+    trail_close_pct = (total_trail_closes / total_all_closes * 100) if total_all_closes > 0 else 0
 
     print(f"\n  📊 Resumen:")
     best_cl = COIN_LABELS.get(best['coin'], best['coin'])
@@ -195,6 +212,8 @@ def print_compare_table(results: list[dict]):
     print(f"     Promedio: {format_pct(avg_ret)}")
     profitable = sum(1 for r in results if r["result"].get("total_return_pct", 0) > 0)
     print(f"     Rentables: {profitable}/{len(results)} ({profitable/len(results)*100:.0f}%)")
+    print(f"     Trailing:  {total_trail_moves} SL moves, {total_trail_closes} trailing closes "
+          f"({trail_close_pct:.0f}% de todos los cierres)")
 
 
 def main():
@@ -228,11 +247,14 @@ Ejemplos:
                         help="Comparativa de todos los scalpers vs BTC (max días por TF)")
     parser.add_argument("--url", default=BASE_URL,
                         help=f"URL del servidor (default: {BASE_URL})")
+    parser.add_argument("--no-trailing", action="store_true",
+                        help="Desactiva trailing stop loss")
 
     args = parser.parse_args()
 
     # Resolver 'all'
     base_url = args.url
+    trailing_enabled = not args.no_trailing
     strategies = ALL_STRATEGIES if "all" in args.strategies else args.strategies
     coins = ALL_COINS if "all" in args.coins else args.coins
     periods = args.periods
@@ -266,6 +288,7 @@ Ejemplos:
     print(f"  Coins:       {', '.join(COIN_LABELS.get(c, c) for c in coins)}")
     print(f"  Periodos:    {', '.join(str(p) + 'd' for p in periods)}")
     print(f"  Leverage:    {args.leverage}x  |  Balance: ${args.balance:.0f}")
+    print(f"  Trailing:    {'ON' if trailing_enabled else 'OFF'}")
     print(f"  Total tests: {total_tests}")
     print(f"{'═' * 65}\n")
 
@@ -292,7 +315,7 @@ Ejemplos:
                 print(f"  [{done}/{total_tests}] {name} | {coin_label} | {period}d ...", end="", flush=True)
 
                 t0 = time.time()
-                result = run_backtest(strategy, coin, period, args.leverage, args.balance, base_url)
+                result = run_backtest(strategy, coin, period, args.leverage, args.balance, base_url, trailing_enabled)
                 elapsed = time.time() - t0
 
                 if result:

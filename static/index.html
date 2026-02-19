@@ -1255,6 +1255,13 @@
                     <input type="number" id="btBalance" value="10000" min="50" step="50"
                            style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
                 </div>
+                <!-- Trailing Toggle -->
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="btTrailing" checked style="width:18px;height:18px;accent-color:#667eea;">
+                        <span>Trailing SL</span>
+                    </label>
+                </div>
             </div>
 
             <button class="btn" id="btRunBtn" onclick="runBacktest()" style="min-width:180px;">
@@ -1393,6 +1400,15 @@
                     <div style="margin-top:4px;font-size:0.75em;color:#999;">0 = use strategy default. Higher risk % = bigger positions, faster profits/losses.</div>
                 </div>
 
+                <!-- Trailing Stop -->
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="trailingEnabled" checked style="width:18px;height:18px;accent-color:#667eea;">
+                        <span>Enable Trailing Stop Loss</span>
+                    </label>
+                    <div style="margin-top:4px;font-size:0.75em;color:#999;">When enabled, stop loss follows price movement to lock in profits.</div>
+                </div>
+
                 <div class="form-group">
                     <label>Trading Strategy</label>
                     <div id="strategyList" style="max-height:250px;overflow-y:auto;">Loading strategies...</div>
@@ -1519,7 +1535,8 @@
                         <p><strong>Status:</strong> <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span></p>
                         <p><strong>Strategy:</strong> <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
                            <span class="badge-leverage">${(agent.min_leverage || 1)}x–${agent.max_leverage}x</span>
-                           ${(agent.risk_pct_min > 0 || agent.risk_pct_max > 0) ? `<span class="badge-leverage" style="background:#e8f5e9;color:#2e7d32;">Risk ${agent.risk_pct_min || '?'}–${agent.risk_pct_max || '?'}%</span>` : ''}</p>
+                           ${(agent.risk_pct_min > 0 || agent.risk_pct_max > 0) ? `<span class="badge-leverage" style="background:#e8f5e9;color:#2e7d32;">Risk ${agent.risk_pct_min || '?'}–${agent.risk_pct_max || '?'}%</span>` : ''}
+                           ${agent.trailing_enabled !== false ? '<span class="badge-trailing" style="font-size:0.75em;">TRAIL ON</span>' : '<span style="font-size:0.75em;background:#ffebee;color:#c62828;padding:2px 6px;border-radius:4px;">TRAIL OFF</span>'}</p>
                         <p><strong>Initial Balance:</strong> $${agent.initial_balance.toFixed(2)}</p>
                         <p><strong>Available Cash:</strong> $${agent.current_balance.toFixed(2)}</p>
                         <p><strong>Positions Value:</strong> $${agent.portfolio_value.toFixed(2)}</p>
@@ -1877,6 +1894,7 @@
                         min_leverage: minLeverage,
                         risk_pct_min: riskMin,
                         risk_pct_max: riskMax,
+                        trailing_enabled: document.getElementById('trailingEnabled').checked,
                     })
                 });
                 
@@ -2424,7 +2442,8 @@
                 coin: document.getElementById('btCoin').value,
                 period_days: parseInt(document.getElementById('btPeriod').value),
                 leverage: lev === 0 ? null : lev,
-                initial_balance: parseFloat(document.getElementById('btBalance').value)
+                initial_balance: parseFloat(document.getElementById('btBalance').value),
+                trailing_enabled: document.getElementById('btTrailing').checked
             };
 
             try {

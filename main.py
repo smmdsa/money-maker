@@ -70,6 +70,7 @@ class AgentCreate(BaseModel):
     min_leverage: int = 1
     risk_pct_min: float = 0.0
     risk_pct_max: float = 0.0
+    trailing_enabled: bool = True
 
 
 class AgentUpdate(BaseModel):
@@ -114,6 +115,7 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         min_leverage=agent.min_leverage,
         risk_pct_min=agent.risk_pct_min,
         risk_pct_max=agent.risk_pct_max,
+        trailing_enabled=agent.trailing_enabled,
     )
     db.add(new_agent)
     db.commit()
@@ -130,6 +132,7 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         "min_leverage": new_agent.min_leverage,
         "risk_pct_min": new_agent.risk_pct_min,
         "risk_pct_max": new_agent.risk_pct_max,
+        "trailing_enabled": getattr(new_agent, 'trailing_enabled', True),
         "created_at": new_agent.created_at.isoformat()
     }
 
@@ -240,6 +243,7 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         "min_leverage": getattr(agent, 'min_leverage', 1),
         "risk_pct_min": getattr(agent, 'risk_pct_min', 0),
         "risk_pct_max": getattr(agent, 'risk_pct_max', 0),
+        "trailing_enabled": getattr(agent, 'trailing_enabled', True),
         "portfolio": portfolio_items,
         "created_at": agent.created_at.isoformat()
     }
@@ -670,6 +674,7 @@ class BacktestRequest(BaseModel):
     period_days: int = 90
     leverage: int = 0          # 0 = use strategy default
     initial_balance: float = 10000.0
+    trailing_enabled: bool = True
 
 
 @app.post("/api/backtest")
@@ -693,6 +698,7 @@ async def run_backtest(req: BacktestRequest):
             period_days=req.period_days,
             leverage=req.leverage,
             initial_balance=req.initial_balance,
+            trailing_enabled=req.trailing_enabled,
         )
         return result.__dict__
     except ValueError as e:

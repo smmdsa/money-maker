@@ -27,6 +27,7 @@ class Signal:
     take_profit_pct: float  # % distance from entry for take-profit
     reasoning: str          # human-readable explanation
     scores: Dict[str, float] = field(default_factory=dict)
+    trail_pct: float = 0.0  # ATR-based trailing distance %; 0 = use stop_loss_pct
 
 
 # ── Strategy Configuration ──────────────────────────────────────────────────
@@ -42,6 +43,7 @@ class StrategyConfig:
     max_positions: int        # max concurrent open positions
     risk_per_trade_pct: float # % of capital risked per trade
     min_confidence: float     # minimum confidence to open position
+    trail_atr_mult: float = 2.5   # Chandelier exit: K × ATR for trailing distance
 
 
 STRATEGIES: Dict[str, StrategyConfig] = {
@@ -56,6 +58,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=3,
         risk_per_trade_pct=2.5,
         min_confidence=0.55,
+        trail_atr_mult=3.0,   # trends need room to breathe
     ),
     "mean_reversion": StrategyConfig(
         key="mean_reversion",
@@ -68,6 +71,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=4,
         risk_per_trade_pct=1.5,
         min_confidence=0.50,
+        trail_atr_mult=2.0,   # tighter — mean reversion targets are closer
     ),
     "momentum_sniper": StrategyConfig(
         key="momentum_sniper",
@@ -80,6 +84,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=2,
         risk_per_trade_pct=2.5,
         min_confidence=0.60,
+        trail_atr_mult=2.5,   # momentum — let runners extend
     ),
     "scalper": StrategyConfig(
         key="scalper",
@@ -93,6 +98,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=5,
         risk_per_trade_pct=4.0,
         min_confidence=0.50,
+        trail_atr_mult=2.5,   # 1h scalper — balanced trail
     ),
     "scalper_1m": StrategyConfig(
         key="scalper_1m",
@@ -105,6 +111,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=5,
         risk_per_trade_pct=2.0,
         min_confidence=0.50,
+        trail_atr_mult=1.5,   # ultra-tight for 1m
     ),
     "scalper_3m": StrategyConfig(
         key="scalper_3m",
@@ -117,6 +124,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=5,
         risk_per_trade_pct=2.5,
         min_confidence=0.50,
+        trail_atr_mult=1.8,   # tight for 3m
     ),
     "scalper_5m": StrategyConfig(
         key="scalper_5m",
@@ -129,6 +137,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=5,
         risk_per_trade_pct=3.0,
         min_confidence=0.50,
+        trail_atr_mult=2.0,   # standard for 5m
     ),
     "scalper_15m": StrategyConfig(
         key="scalper_15m",
@@ -141,6 +150,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=5,
         risk_per_trade_pct=3.5,
         min_confidence=0.50,
+        trail_atr_mult=2.2,   # wider for 15m swing
     ),
     "grid_trader": StrategyConfig(
         key="grid_trader",
@@ -153,6 +163,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=8,
         risk_per_trade_pct=1.0,
         min_confidence=0.40,
+        trail_atr_mult=2.0,   # grid targets are close
     ),
     "confluence_master": StrategyConfig(
         key="confluence_master",
@@ -165,6 +176,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_positions=2,
         risk_per_trade_pct=3.0,
         min_confidence=0.70,
+        trail_atr_mult=2.5,   # balanced — high confidence entries
     ),
 }
 
@@ -696,10 +708,11 @@ class StrategyEngine:
         # ═══════════════════════════════════════════════════════════════
         sl = max(atr_pct * 1.5, 1.5)
         tp = max(atr_pct * 4.5, sl * 3.0)
+        trail = max(atr_pct * cfg.trail_atr_mult, sl)  # Chandelier exit
 
         return self._build_signal(
             long_score, short_score, reasons, cfg,
-            has_long, has_short, sl, tp, entry_price, price
+            has_long, has_short, sl, tp, entry_price, price, trail
         )
 
     # ── 2. Mean Reversion ───────────────────────────────────────────────
@@ -772,10 +785,11 @@ class StrategyEngine:
         atr_pct = ind.get("atr_pct") or 2.0
         sl = max(atr_pct * 1.5, 2.0)
         tp = max(atr_pct * 2.5, 4.0)
+        trail = max(atr_pct * cfg.trail_atr_mult, sl)  # Chandelier exit
 
         return self._build_signal(
             long_score, short_score, reasons, cfg,
-            has_long, has_short, sl, tp, entry_price, price
+            has_long, has_short, sl, tp, entry_price, price, trail
         )
 
     # ── 3. Momentum Sniper ──────────────────────────────────────────────
@@ -850,10 +864,11 @@ class StrategyEngine:
         atr_pct = ind.get("atr_pct") or 3.0
         sl = max(atr_pct * 1.5, 2.0)
         tp = max(atr_pct * 4, 8.0)  # momentum -> let winners run
+        trail = max(atr_pct * cfg.trail_atr_mult, sl)  # Chandelier exit
 
         return self._build_signal(
             long_score, short_score, reasons, cfg,
-            has_long, has_short, sl, tp, entry_price, price
+            has_long, has_short, sl, tp, entry_price, price, trail
         )
 
     # ── 4. Scalper Pro ──────────────────────────────────────────────────
@@ -1009,10 +1024,11 @@ class StrategyEngine:
         # ═══════════════════════════════════════════════════════════════
         sl = max(atr_pct * 1.0, 0.6)
         tp = max(atr_pct * 3.0, sl * 3.0)
+        trail = max(atr_pct * cfg.trail_atr_mult, sl)  # Chandelier exit
 
         return self._build_signal(
             long_score, short_score, reasons, cfg,
-            has_long, has_short, sl, tp, entry_price, price
+            has_long, has_short, sl, tp, entry_price, price, trail
         )
 
     # ── 5. Grid Trader ──────────────────────────────────────────────────
@@ -1070,10 +1086,11 @@ class StrategyEngine:
 
         sl = max(atr_pct * 3, 4.0)  # wider stops for grid
         tp = max(atr_pct * 1.5, 2.5)  # take profit at next grid level
+        trail = max(atr_pct * cfg.trail_atr_mult, sl)  # Chandelier exit
 
         return self._build_signal(
             long_score, short_score, reasons, cfg,
-            has_long, has_short, sl, tp, entry_price, price
+            has_long, has_short, sl, tp, entry_price, price, trail
         )
 
     # ── 6. Confluence Master ────────────────────────────────────────────
@@ -1211,7 +1228,8 @@ class StrategyEngine:
                 3.0, 8.0,
                 f"HOLD — Insufficient confluence: {long_signals}L/{short_signals}S "
                 f"out of {total_checks} checks. Need 5+. | " + "; ".join(reasons),
-                {"long": long_signals, "short": short_signals, "checks": total_checks}
+                {"long": long_signals, "short": short_signals, "checks": total_checks},
+                trail_pct=0.0,
             )
 
         # Higher leverage for stronger confluence
@@ -1224,6 +1242,7 @@ class StrategyEngine:
         atr_pct = ind.get("atr_pct") or 3.0
         sl = max(atr_pct * 2, 3.0)
         tp = max(atr_pct * 5, 10.0)
+        trail = max(atr_pct * cfg.trail_atr_mult, sl)  # Chandelier exitrail_atr_mult, sl)  # Chandelier exitrail_atr_mult, sl)  # Chandelier exitrail_atr_mult, sl)  # Chandelier exit
 
         direction = dominant
         reasoning = (
@@ -1241,7 +1260,8 @@ class StrategyEngine:
 
         return Signal(
             direction, confidence, leverage, sl, tp, reasoning,
-            {"long": long_signals, "short": short_signals, "checks": total_checks}
+            {"long": long_signals, "short": short_signals, "checks": total_checks},
+            trail_pct=trail,
         )
 
     # ── Shared signal builder ───────────────────────────────────────────
@@ -1258,6 +1278,7 @@ class StrategyEngine:
         take_profit_pct: float,
         entry_price: float,
         current_price: float,
+        trail_pct: float = 0.0,
     ) -> Signal:
         """Convert raw scores into a Signal object."""
         max_score = max(long_score, short_score)
@@ -1272,11 +1293,15 @@ class StrategyEngine:
         elif confidence < 0.5:
             leverage = max(1, cfg.default_leverage - 1)
 
+                def _sig(direction, conf, lev, reason, scores):
+            return Signal(direction, conf, lev, stop_loss_pct, take_profit_pct,
+                          reason, scores, trail_pct=trail_pct)
+
         # Check for position close signals first
         if has_long:
             if short_score >= min_score_to_act and short_score > long_score:
-                return Signal(
-                    "close_long", confidence, leverage, stop_loss_pct, take_profit_pct,
+                return _sig(
+                    "close_long", confidence, leverage,
                     f"CLOSE LONG — Bearish reversal: {reasoning_str}",
                     {"long": long_score, "short": short_score}
                 )
@@ -1284,22 +1309,22 @@ class StrategyEngine:
             if entry_price > 0:
                 pnl_pct = (current_price - entry_price) / entry_price * 100
                 if pnl_pct <= -stop_loss_pct:
-                    return Signal(
-                        "close_long", 0.95, leverage, stop_loss_pct, take_profit_pct,
+                    return _sig(
+                        "close_long", 0.95, leverage,
                         f"CLOSE LONG — Stop-loss hit ({pnl_pct:.1f}%)",
                         {"pnl_pct": pnl_pct}
                     )
                 if pnl_pct >= take_profit_pct:
-                    return Signal(
-                        "close_long", 0.90, leverage, stop_loss_pct, take_profit_pct,
+                    return _sig(
+                        "close_long", 0.90, leverage,
                         f"CLOSE LONG — Take-profit hit (+{pnl_pct:.1f}%)",
                         {"pnl_pct": pnl_pct}
                     )
 
         if has_short:
             if long_score >= min_score_to_act and long_score > short_score:
-                return Signal(
-                    "close_short", confidence, leverage, stop_loss_pct, take_profit_pct,
+                return _sig(
+                    "close_short", confidence, leverage,
                     f"CLOSE SHORT — Bullish reversal: {reasoning_str}",
                     {"long": long_score, "short": short_score}
                 )
@@ -1307,14 +1332,14 @@ class StrategyEngine:
             if entry_price > 0:
                 pnl_pct = (entry_price - current_price) / entry_price * 100
                 if pnl_pct <= -stop_loss_pct:
-                    return Signal(
-                        "close_short", 0.95, leverage, stop_loss_pct, take_profit_pct,
+                    return _sig(
+                        "close_short", 0.95, leverage,
                         f"CLOSE SHORT — Stop-loss hit ({pnl_pct:.1f}%)",
                         {"pnl_pct": pnl_pct}
                     )
                 if pnl_pct >= take_profit_pct:
-                    return Signal(
-                        "close_short", 0.90, leverage, stop_loss_pct, take_profit_pct,
+                    return _sig(
+                        "close_short", 0.90, leverage,
                         f"CLOSE SHORT — Take-profit hit (+{pnl_pct:.1f}%)",
                         {"pnl_pct": pnl_pct}
                     )
@@ -1322,22 +1347,22 @@ class StrategyEngine:
         # New position signals
         if long_score >= min_score_to_act and long_score > short_score and not has_long:
             if confidence >= cfg.min_confidence:
-                return Signal(
-                    "long", confidence, leverage, stop_loss_pct, take_profit_pct,
+                return _sig(
+                    "long", confidence, leverage,
                     f"LONG — {reasoning_str}",
                     {"long": long_score, "short": short_score}
                 )
 
         if short_score >= min_score_to_act and short_score > long_score and not has_short:
             if confidence >= cfg.min_confidence:
-                return Signal(
-                    "short", confidence, leverage, stop_loss_pct, take_profit_pct,
+                return _sig(
+                    "short", confidence, leverage,
                     f"SHORT — {reasoning_str}",
                     {"long": long_score, "short": short_score}
                 )
 
-        return Signal(
-            "neutral", confidence, leverage, stop_loss_pct, take_profit_pct,
+        return _sig(
+            "neutral", confidence, leverage,
             f"HOLD — {reasoning_str} (L={long_score}/S={short_score})",
             {"long": long_score, "short": short_score}
         )

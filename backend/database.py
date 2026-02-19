@@ -33,6 +33,7 @@ def _run_migrations():
     migrations = [
         ("portfolio", "trailing_stop_pct", "REAL DEFAULT 0"),
         ("portfolio", "price_extreme", "REAL DEFAULT 0"),
+        ("trading_agents", "trailing_enabled", "BOOLEAN DEFAULT 1"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in migrations:
