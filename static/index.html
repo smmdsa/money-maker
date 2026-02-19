@@ -727,6 +727,18 @@
     <script>
         let selectedAgentId = null;
         let ws = null;
+
+        // ── Smart price formatter ─────────────────────────────────────────
+        // Shows more decimals for cheaper coins so small changes are visible
+        function fmtPrice(price) {
+            if (price == null || isNaN(price)) return 'N/A';
+            if (price >= 1000)  return price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            if (price >= 100)   return price.toFixed(2);
+            if (price >= 10)    return price.toFixed(3);
+            if (price >= 1)     return price.toFixed(4);
+            if (price >= 0.01)  return price.toFixed(5);
+            return price.toFixed(6);
+        }
         
         // Initialize WebSocket connection
         function initWebSocket() {
@@ -852,10 +864,10 @@
                                             <td><span class="badge-leverage">${p.leverage}x</span></td>
                                             <td>$${p.margin.toFixed(2)}</td>
                                             <td class="${p.profit_loss >= 0 ? 'profit' : 'loss'}">
-                                                ${p.profit_loss >= 0 ? '+' : ''}$${p.profit_loss.toFixed(2)}
-                                                <br><small>(${p.profit_loss_pct.toFixed(1)}%)</small>
+                                                ${p.profit_loss >= 0 ? '+' : ''}$${p.profit_loss.toFixed(4)}
+                                                <br><small>(${p.profit_loss_pct.toFixed(2)}%)</small>
                                             </td>
-                                            <td><small>$${p.liquidation_price.toFixed(2)}</small></td>
+                                            <td><small>$${fmtPrice(p.liquidation_price)}</small></td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
@@ -894,7 +906,7 @@
                         <div class="log-content">
                             <span class="${typeBadge}">${typeLabel}</span>
                             ${trade.leverage > 1 ? `<span class="badge-leverage">${trade.leverage}x</span>` : ''}
-                            ${trade.symbol} @ $${trade.price.toFixed(2)}
+                            ${trade.symbol} @ $${fmtPrice(trade.price)}
                             <br>
                             Margin: $${trade.margin.toFixed(2)} | Size: $${trade.total_value.toFixed(2)}
                             ${trade.profit_loss !== 0 ? `<br><span class="${trade.profit_loss >= 0 ? 'profit' : 'loss'}">
@@ -985,7 +997,7 @@
                 marketPrices.innerHTML = prices.map(coin => `
                     <div class="price-card">
                         <div class="coin-name">${coin.symbol}</div>
-                        <div class="coin-price">$${coin.current_price ? coin.current_price.toFixed(2) : 'N/A'}</div>
+                        <div class="coin-price">$${coin.current_price ? fmtPrice(coin.current_price) : 'N/A'}</div>
                         ${coin.price_change_24h ? `
                             <div class="price-change ${coin.price_change_24h >= 0 ? 'profit' : 'loss'}">
                                 ${coin.price_change_24h >= 0 ? '↑' : '↓'} ${Math.abs(coin.price_change_24h).toFixed(2)}%
