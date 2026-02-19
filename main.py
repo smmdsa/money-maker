@@ -66,6 +66,9 @@ class AgentCreate(BaseModel):
     initial_balance: float = 10000.0
     strategy: str = "confluence_master"
     max_leverage: int = 10
+    min_leverage: int = 1
+    risk_pct_min: float = 0.0
+    risk_pct_max: float = 0.0
 
 
 class AgentUpdate(BaseModel):
@@ -91,6 +94,10 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"Unknown strategy: {agent.strategy}")
     if agent.max_leverage < 1 or agent.max_leverage > 125:
         raise HTTPException(status_code=400, detail="Max leverage must be 1-125")
+    if agent.min_leverage < 1 or agent.min_leverage > agent.max_leverage:
+        raise HTTPException(status_code=400, detail="Min leverage must be 1 to max_leverage")
+    if agent.risk_pct_max > 0 and agent.risk_pct_min > agent.risk_pct_max:
+        raise HTTPException(status_code=400, detail="risk_pct_min must be <= risk_pct_max")
     
     existing = db.query(TradingAgent).filter(TradingAgent.name == agent.name).first()
     if existing:
@@ -103,6 +110,9 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         status="active",
         strategy=agent.strategy,
         max_leverage=agent.max_leverage,
+        min_leverage=agent.min_leverage,
+        risk_pct_min=agent.risk_pct_min,
+        risk_pct_max=agent.risk_pct_max,
     )
     db.add(new_agent)
     db.commit()
@@ -116,6 +126,9 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         "status": new_agent.status,
         "strategy": new_agent.strategy,
         "max_leverage": new_agent.max_leverage,
+        "min_leverage": new_agent.min_leverage,
+        "risk_pct_min": new_agent.risk_pct_min,
+        "risk_pct_max": new_agent.risk_pct_max,
         "created_at": new_agent.created_at.isoformat()
     }
 
@@ -221,6 +234,9 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         "status": agent.status,
         "strategy": agent.strategy,
         "max_leverage": agent.max_leverage,
+        "min_leverage": getattr(agent, 'min_leverage', 1),
+        "risk_pct_min": getattr(agent, 'risk_pct_min', 0),
+        "risk_pct_max": getattr(agent, 'risk_pct_max', 0),
         "portfolio": portfolio_items,
         "created_at": agent.created_at.isoformat()
     }

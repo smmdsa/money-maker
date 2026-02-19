@@ -21,6 +21,9 @@ class TradingAgent(Base):
     status = Column(String, default="active")  # active, paused, stopped
     strategy = Column(String, default="confluence_master")  # strategy key
     max_leverage = Column(Integer, default=10)
+    min_leverage = Column(Integer, default=1)
+    risk_pct_min = Column(Float, default=0.0)   # 0 = use strategy default
+    risk_pct_max = Column(Float, default=0.0)   # 0 = use strategy default
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

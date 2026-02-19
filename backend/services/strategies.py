@@ -1351,11 +1351,19 @@ def calculate_position_size(
     leverage: int,
     stop_loss_pct: float,
     current_price: float,
+    risk_pct_min: float = 0,
+    risk_pct_max: float = 0,
 ) -> float:
     """
     Professional risk-based position sizing.
     Risk per trade = % of capital. Position sized so that if stop-loss
     is hit, loss equals the risk amount.
+
+    Agent-level overrides:
+        risk_pct_min/max — clamp the strategy's risk_per_trade_pct.
+        When both > 0, the strategy's default is clamped to [min, max].
+        When only max > 0, it acts as a cap.
+        When only min > 0, it acts as a floor.
 
     Returns: margin (USD to commit)
     """
@@ -1363,7 +1371,14 @@ def calculate_position_size(
     if not cfg:
         return 0.0
 
-    risk_pct = cfg.risk_per_trade_pct / 100.0
+    # Start with strategy default, then apply agent overrides
+    effective_risk = cfg.risk_per_trade_pct
+    if risk_pct_min > 0:
+        effective_risk = max(effective_risk, risk_pct_min)
+    if risk_pct_max > 0:
+        effective_risk = min(effective_risk, risk_pct_max)
+
+    risk_pct = effective_risk / 100.0
     risk_amount = balance * risk_pct  # max USD to lose
 
     # margin = risk_amount / (stop_loss_pct/100 * leverage)

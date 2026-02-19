@@ -1140,7 +1140,7 @@
 
     <!-- Create Agent Modal -->
     <div class="modal" id="createAgentModal">
-        <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-content" style="max-width: 640px;">
             <span class="close-btn" onclick="hideCreateAgentModal()">&times;</span>
             <h2>Create New Trading Agent</h2>
             <form id="createAgentForm" onsubmit="createAgent(event)">
@@ -1150,19 +1150,80 @@
                 </div>
                 <div class="form-group">
                     <label>Initial Balance (USD)</label>
-                    <input type="number" id="initialBalance" required value="10000" step="50" min="50">
+                    <input type="number" id="initialBalance" required value="10000" step="50" min="50"
+                           oninput="suggestProfile()">
                 </div>
+
+                <!-- Account Profile Presets -->
                 <div class="form-group">
-                    <label>Max Leverage</label>
+                    <label>Account Profile</label>
+                    <div id="profileSelector" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
+                        <button type="button" class="profile-btn" data-profile="micro"
+                                onclick="applyProfile('micro', this)"
+                                style="padding:8px 4px;border:2px solid #e0e0e0;border-radius:8px;background:#fff;cursor:pointer;text-align:center;font-size:0.8em;">
+                            <div style="font-weight:700;color:#e65100;">⚡ Micro</div>
+                            <div style="color:#999;font-size:0.85em;">$50–100</div>
+                        </button>
+                        <button type="button" class="profile-btn" data-profile="small"
+                                onclick="applyProfile('small', this)"
+                                style="padding:8px 4px;border:2px solid #e0e0e0;border-radius:8px;background:#fff;cursor:pointer;text-align:center;font-size:0.8em;">
+                            <div style="font-weight:700;color:#ff9800;">🔥 Small</div>
+                            <div style="color:#999;font-size:0.85em;">$100–500</div>
+                        </button>
+                        <button type="button" class="profile-btn selected" data-profile="standard"
+                                onclick="applyProfile('standard', this)"
+                                style="padding:8px 4px;border:2px solid #667eea;border-radius:8px;background:#f0f2ff;cursor:pointer;text-align:center;font-size:0.8em;">
+                            <div style="font-weight:700;color:#667eea;">📊 Standard</div>
+                            <div style="color:#999;font-size:0.85em;">$500–2k</div>
+                        </button>
+                        <button type="button" class="profile-btn" data-profile="large"
+                                onclick="applyProfile('large', this)"
+                                style="padding:8px 4px;border:2px solid #e0e0e0;border-radius:8px;background:#fff;cursor:pointer;text-align:center;font-size:0.8em;">
+                            <div style="font-weight:700;color:#2e7d32;">🏦 Large</div>
+                            <div style="color:#999;font-size:0.85em;">$2k+</div>
+                        </button>
+                    </div>
+                    <div id="profileHint" style="margin-top:6px;font-size:0.8em;color:#667eea;font-style:italic;"></div>
+                </div>
+
+                <!-- Leverage Range -->
+                <div class="form-group">
+                    <label>Leverage Range</label>
                     <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:0.85em;color:#666;min-width:28px;">Min</span>
+                        <input type="range" id="minLeverage" min="1" max="50" value="1" style="flex:1"
+                               oninput="syncLeverageSliders()">
+                        <span id="minLevLabel" style="font-weight:700;min-width:40px;">1x</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+                        <span style="font-size:0.85em;color:#666;min-width:28px;">Max</span>
                         <input type="range" id="maxLeverage" min="1" max="50" value="10" style="flex:1"
-                               oninput="document.getElementById('leverageLabel').textContent = this.value + 'x'">
+                               oninput="syncLeverageSliders()">
                         <span id="leverageLabel" style="font-weight:700;min-width:40px;">10x</span>
                     </div>
                 </div>
+
+                <!-- Risk % Range -->
+                <div class="form-group">
+                    <label>Risk per Trade (%)</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:0.85em;color:#666;min-width:28px;">Min</span>
+                        <input type="range" id="riskMin" min="0" max="20" value="0" step="0.5" style="flex:1"
+                               oninput="syncRiskSliders()">
+                        <span id="riskMinLabel" style="font-weight:700;min-width:55px;">Auto</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+                        <span style="font-size:0.85em;color:#666;min-width:28px;">Max</span>
+                        <input type="range" id="riskMax" min="0" max="20" value="0" step="0.5" style="flex:1"
+                               oninput="syncRiskSliders()">
+                        <span id="riskMaxLabel" style="font-weight:700;min-width:55px;">Auto</span>
+                    </div>
+                    <div style="margin-top:4px;font-size:0.75em;color:#999;">0 = use strategy default. Higher risk % = bigger positions, faster profits/losses.</div>
+                </div>
+
                 <div class="form-group">
                     <label>Trading Strategy</label>
-                    <div id="strategyList" style="max-height:280px;overflow-y:auto;">Loading strategies...</div>
+                    <div id="strategyList" style="max-height:250px;overflow-y:auto;">Loading strategies...</div>
                 </div>
                 <input type="hidden" id="selectedStrategy" value="confluence_master">
                 <button type="submit" class="btn" style="width:100%;">Create Agent</button>
@@ -1285,7 +1346,8 @@
                         <h3>${agent.name}</h3>
                         <p><strong>Status:</strong> <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span></p>
                         <p><strong>Strategy:</strong> <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
-                           <span class="badge-leverage">${agent.max_leverage}x max</span></p>
+                           <span class="badge-leverage">${(agent.min_leverage || 1)}x–${agent.max_leverage}x</span>
+                           ${(agent.risk_pct_min > 0 || agent.risk_pct_max > 0) ? `<span class="badge-leverage" style="background:#e8f5e9;color:#2e7d32;">Risk ${agent.risk_pct_min || '?'}–${agent.risk_pct_max || '?'}%</span>` : ''}</p>
                         <p><strong>Initial Balance:</strong> $${agent.initial_balance.toFixed(2)}</p>
                         <p><strong>Available Cash:</strong> $${agent.current_balance.toFixed(2)}</p>
                         <p><strong>Positions Value:</strong> $${agent.portfolio_value.toFixed(2)}</p>
@@ -1614,6 +1676,9 @@
             const initialBalance = parseFloat(document.getElementById('initialBalance').value);
             const strategy = document.getElementById('selectedStrategy').value;
             const maxLeverage = parseInt(document.getElementById('maxLeverage').value);
+            const minLeverage = parseInt(document.getElementById('minLeverage').value);
+            const riskMin = parseFloat(document.getElementById('riskMin').value);
+            const riskMax = parseFloat(document.getElementById('riskMax').value);
             
             try {
                 const response = await fetch('/api/agents', {
@@ -1626,6 +1691,9 @@
                         initial_balance: initialBalance,
                         strategy: strategy,
                         max_leverage: maxLeverage,
+                        min_leverage: minLeverage,
+                        risk_pct_min: riskMin,
+                        risk_pct_max: riskMax,
                     })
                 });
                 
@@ -1641,6 +1709,68 @@
                 console.error('Error creating agent:', error);
                 alert('Error creating agent');
             }
+        }
+
+        // ── Account Profile Presets ──────────────────────────────────────
+        const PROFILES = {
+            micro:    { minLev: 10, maxLev: 25, riskMin: 5,   riskMax: 10,  hint: '⚡ Micro: High leverage + high risk%. Small moves → $1-2 profit per trade. Best with Scalper strategies.' },
+            small:    { minLev: 5,  maxLev: 15, riskMin: 3,   riskMax: 7,   hint: '🔥 Small: Moderate-high leverage. Balanced risk for accounts $100-$500.' },
+            standard: { minLev: 1,  maxLev: 10, riskMin: 0,   riskMax: 0,   hint: '📊 Standard: Uses strategy defaults. Best for accounts $500-$2k.' },
+            large:    { minLev: 1,  maxLev: 5,  riskMin: 1,   riskMax: 3,   hint: '🏦 Large: Conservative leverage + capped risk. Protects larger capital.' },
+        };
+
+        function applyProfile(key, btn) {
+            const p = PROFILES[key];
+            if (!p) return;
+            document.getElementById('minLeverage').value = p.minLev;
+            document.getElementById('maxLeverage').value = p.maxLev;
+            document.getElementById('riskMin').value = p.riskMin;
+            document.getElementById('riskMax').value = p.riskMax;
+            syncLeverageSliders();
+            syncRiskSliders();
+            // Update visual selection
+            document.querySelectorAll('.profile-btn').forEach(b => {
+                b.style.border = '2px solid #e0e0e0';
+                b.style.background = '#fff';
+            });
+            btn.style.border = '2px solid #667eea';
+            btn.style.background = '#f0f2ff';
+            document.getElementById('profileHint').textContent = p.hint;
+        }
+
+        function suggestProfile() {
+            const balance = parseFloat(document.getElementById('initialBalance').value) || 0;
+            let suggested = 'standard';
+            if (balance <= 100) suggested = 'micro';
+            else if (balance <= 500) suggested = 'small';
+            else if (balance <= 2000) suggested = 'standard';
+            else suggested = 'large';
+            const btn = document.querySelector(`.profile-btn[data-profile="${suggested}"]`);
+            if (btn) applyProfile(suggested, btn);
+        }
+
+        function syncLeverageSliders() {
+            const minEl = document.getElementById('minLeverage');
+            const maxEl = document.getElementById('maxLeverage');
+            // Enforce min <= max
+            if (parseInt(minEl.value) > parseInt(maxEl.value)) {
+                maxEl.value = minEl.value;
+            }
+            document.getElementById('minLevLabel').textContent = minEl.value + 'x';
+            document.getElementById('leverageLabel').textContent = maxEl.value + 'x';
+        }
+
+        function syncRiskSliders() {
+            const minEl = document.getElementById('riskMin');
+            const maxEl = document.getElementById('riskMax');
+            const minV = parseFloat(minEl.value);
+            const maxV = parseFloat(maxEl.value);
+            // Enforce min <= max (unless max is 0 = auto)
+            if (maxV > 0 && minV > maxV) {
+                maxEl.value = minEl.value;
+            }
+            document.getElementById('riskMinLabel').textContent = minV === 0 ? 'Auto' : minV.toFixed(1) + '%';
+            document.getElementById('riskMaxLabel').textContent = parseFloat(maxEl.value) === 0 ? 'Auto' : parseFloat(maxEl.value).toFixed(1) + '%';
         }
         
         // Toggle agent status
@@ -1694,6 +1824,7 @@
         function showCreateAgentModal() {
             document.getElementById('createAgentModal').classList.add('active');
             loadStrategies();
+            suggestProfile();
         }
 
         // Decision Detail Modal

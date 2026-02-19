@@ -357,10 +357,19 @@ class TradingAgentService:
                     "reasoning": "Price unavailable", "strategy": strategy_key}
 
         leverage = min(signal.leverage, agent.max_leverage)
+        # Apply agent-level minimum leverage override
+        min_lev = getattr(agent, 'min_leverage', 1) or 1
+        leverage = max(leverage, min_lev)
+
+        # Agent-level risk % overrides
+        risk_min = getattr(agent, 'risk_pct_min', 0) or 0
+        risk_max = getattr(agent, 'risk_pct_max', 0) or 0
 
         margin = calculate_position_size(
             agent.current_balance, strategy_key, leverage,
-            signal.stop_loss_pct, current_price
+            signal.stop_loss_pct, current_price,
+            risk_pct_min=risk_min,
+            risk_pct_max=risk_max,
         )
 
         if margin <= 0 or margin > agent.current_balance:
