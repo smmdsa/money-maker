@@ -3,11 +3,12 @@
 Backtest CLI — Herramienta reutilizable para backtesting de estrategias.
 
 Uso:
-  python3 backtest_cli.py                          # Scalper BTC 30d (default)
-  python3 backtest_cli.py -s scalper -c BTCUSDT -p 30 90 180
-  python3 backtest_cli.py -s all -c BTCUSDT ETHUSDT -p 30 90
-  python3 backtest_cli.py -s scalper trend_rider -c BTCUSDT -p 30 -b 1000 -l 10
-  python3 backtest_cli.py --compare               # Todas las estrategias vs BTC 90d
+  python3 backtest_cli.py                          # Scalper 1h BTC 30d (default)
+  python3 backtest_cli.py -s scalper -p 30 90 180
+  python3 backtest_cli.py -s scalper_1m scalper_5m -c bitcoin -p 7
+  python3 backtest_cli.py -s all -c bitcoin ethereum -p 30
+  python3 backtest_cli.py --compare                # Todas las estrategias vs BTC 90d
+  python3 backtest_cli.py --scalpers               # Todas las variantes scalper vs BTC
 """
 
 import argparse
@@ -20,7 +21,8 @@ import urllib.error
 BASE_URL = "http://localhost:8001"
 
 ALL_STRATEGIES = [
-    "scalper", "trend_rider", "mean_reversion",
+    "scalper", "scalper_1m", "scalper_3m", "scalper_5m", "scalper_15m",
+    "trend_rider", "mean_reversion",
     "momentum_sniper", "grid_trader", "confluence_master"
 ]
 
@@ -33,7 +35,11 @@ COIN_LABELS = {
 }
 
 STRATEGY_NAMES = {
-    "scalper": "Scalper Pro",
+    "scalper": "Scalper Pro 1h",
+    "scalper_1m": "Scalper Pro 1m",
+    "scalper_3m": "Scalper Pro 3m",
+    "scalper_5m": "Scalper Pro 5m",
+    "scalper_15m": "Scalper Pro 15m",
     "trend_rider": "Trend Rider",
     "mean_reversion": "Mean Reversion",
     "momentum_sniper": "Momentum Sniper",
@@ -61,7 +67,7 @@ def run_backtest(strategy: str, coin: str, period: int,
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=300) as resp:
             return json.loads(resp.read())
     except urllib.error.URLError as e:
         print(f"  ❌ Error de conexión: {e}")
@@ -86,6 +92,7 @@ def print_result(r: dict, strategy: str, coin: str, period: int):
     name = STRATEGY_NAMES.get(strategy, strategy)
     coin_label = COIN_LABELS.get(coin, coin)
     ret = r.get("total_return_pct", 0)
+    ret_gross = r.get("total_return_gross_pct", ret)
     bh = r.get("buy_hold_return_pct", 0)
     trades = r.get("total_trades", 0)
     wr = r.get("win_rate", 0)
@@ -93,6 +100,10 @@ def print_result(r: dict, strategy: str, coin: str, period: int):
     dd = r.get("max_drawdown_pct", 0)
     sharpe = r.get("sharpe_ratio", 0)
     final = r.get("final_balance", 0)
+    final_gross = r.get("final_balance_gross", final)
+    commissions = r.get("total_commissions", 0)
+    funding = r.get("total_funding", 0)
+    total_fees = r.get("total_fees", 0)
 
     # Calcular R:R desde trades
     wins = [t for t in r.get("trades", []) if (t.get("pnl") or 0) > 0]
@@ -107,8 +118,10 @@ def print_result(r: dict, strategy: str, coin: str, period: int):
     alpha = ret - bh
 
     print(f"  ┌─ {name} | {coin_label} | {period}d")
-    print(f"  │ Return: {format_pct(ret)}  vs B&H: {format_pct(bh)}  Alpha: {format_pct(alpha)}")
-    print(f"  │ Final:  ${final:.2f}  |  Trades: {trades}  (W:{tp_count} L:{sl_count})")
+    print(f"  │ Gross:  {format_pct(ret_gross)}  (${final_gross:.2f})")
+    print(f"  │ Net:    {format_pct(ret)}  (${final:.2f})  vs B&H: {format_pct(bh)}  Alpha: {format_pct(alpha)}")
+    print(f"  │ Fees:   ${total_fees:.2f}  (Comm: ${commissions:.2f} + Funding: ${funding:.2f})")
+    print(f"  │ Trades: {trades}  (W:{tp_count} L:{sl_count})")
     print(f"  │ WR: {wr:.1f}%  |  PF: {pf:.2f}  |  R:R: {rr:.2f}  |  Sharpe: {sharpe:.2f}")
     print(f"  │ Max DD: {dd:.1f}%")
     print(f"  └{'─' * 60}")
@@ -121,9 +134,9 @@ def print_compare_table(results: list[dict]):
 
     # Header
     print()
-    print(f"  {'Strategy':<20} {'Coin':<6} {'Days':>4}  {'Return':>8}  {'B&H':>8}  "
-          f"{'Alpha':>8}  {'Trades':>6}  {'WR':>5}  {'PF':>5}  {'R:R':>5}  {'DD':>6}")
-    print(f"  {'─' * 100}")
+    print(f"  {'Strategy':<20} {'Coin':<6} {'Days':>4}  {'Gross':>8}  {'Net':>8}  "
+          f"{'Fees':>6}  {'B&H':>8}  {'Alpha':>8}  {'Trd':>4}  {'WR':>4}  {'PF':>5}  {'DD':>5}")
+    print(f"  {'─' * 105}")
 
     for entry in results:
         r = entry["result"]
@@ -133,18 +146,14 @@ def print_compare_table(results: list[dict]):
         name = STRATEGY_NAMES.get(s, s)[:18]
 
         ret = r.get("total_return_pct", 0)
+        ret_gross = r.get("total_return_gross_pct", ret)
         bh = r.get("buy_hold_return_pct", 0)
         alpha = ret - bh
         trades = r.get("total_trades", 0)
         wr = r.get("win_rate", 0)
         pf = r.get("profit_factor", 0)
         dd = r.get("max_drawdown_pct", 0)
-
-        wins = [t for t in r.get("trades", []) if (t.get("pnl") or 0) > 0]
-        losses = [t for t in r.get("trades", []) if (t.get("pnl") or 0) < 0]
-        avg_win = sum((t["pnl"] or 0) for t in wins) / len(wins) if wins else 0
-        avg_loss = abs(sum((t["pnl"] or 0) for t in losses) / len(losses)) if losses else 1
-        rr = avg_win / avg_loss if avg_loss > 0 else 0
+        fees = r.get("total_fees", 0)
 
         # Color del return
         ret_s = f"{ret:+.1f}%"
@@ -153,16 +162,23 @@ def print_compare_table(results: list[dict]):
         else:
             ret_c = f"\033[91m{ret_s:>8}\033[0m"
 
+        gross_s = f"{ret_gross:+.1f}%"
+        if ret_gross > 0:
+            gross_c = f"\033[92m{gross_s:>8}\033[0m"
+        else:
+            gross_c = f"\033[91m{gross_s:>8}\033[0m"
+
         alpha_s = f"{alpha:+.1f}%"
         if alpha > 0:
             alpha_c = f"\033[92m{alpha_s:>8}\033[0m"
         else:
             alpha_c = f"\033[91m{alpha_s:>8}\033[0m"
 
-        print(f"  {name:<20} {c:<6} {p:>4}  {ret_c}  {bh:>+7.1f}%  "
-              f"{alpha_c}  {trades:>6}  {wr:>4.0f}%  {pf:>5.2f}  {rr:>5.2f}  {dd:>5.1f}%")
+        print(f"  {name:<20} {c:<6} {p:>4}  {gross_c}  {ret_c}  "
+              f"${fees:>5.1f}  {bh:>+7.1f}%  "
+              f"{alpha_c}  {trades:>4}  {wr:>3.0f}%  {pf:>5.2f}  {dd:>4.1f}%")
 
-    print(f"  {'─' * 100}")
+    print(f"  {'─' * 105}")
 
     # Resumen
     best = max(results, key=lambda x: x["result"].get("total_return_pct", -999))
@@ -208,6 +224,8 @@ Ejemplos:
                         help="Balance inicial (default: 100)")
     parser.add_argument("--compare", action="store_true",
                         help="Comparativa completa: todas las estrategias vs BTC 90d")
+    parser.add_argument("--scalpers", action="store_true",
+                        help="Comparativa de todos los scalpers vs BTC (max días por TF)")
     parser.add_argument("--url", default=BASE_URL,
                         help=f"URL del servidor (default: {BASE_URL})")
 
@@ -225,7 +243,23 @@ Ejemplos:
         coins = ["bitcoin"]
         periods = [90]
 
-    total_tests = len(strategies) * len(coins) * len(periods)
+    # Modo scalpers: cada variante con su periodo máximo natural
+    if args.scalpers:
+        strategies = ["scalper_1m", "scalper_3m", "scalper_5m", "scalper_15m", "scalper"]
+        coins = ["bitcoin"]
+        # Override: ejecutar cada scalper con su periodo máximo
+        # Se maneja abajo en el loop
+        periods = [0]  # sentinel — se reemplaza per-strategy
+
+    # Recalcular total_tests
+    if args.scalpers:
+        _SCALPER_MAX_DAYS = {
+            "scalper_1m": 7, "scalper_3m": 30, "scalper_5m": 30,
+            "scalper_15m": 90, "scalper": 90,
+        }
+        total_tests = sum(len(coins) for s in strategies)
+    else:
+        total_tests = len(strategies) * len(coins) * len(periods)
     print(f"\n{'═' * 65}")
     print(f"  🚀 BACKTEST CLI")
     print(f"  Estrategias: {', '.join(strategies)}")
@@ -235,12 +269,23 @@ Ejemplos:
     print(f"  Total tests: {total_tests}")
     print(f"{'═' * 65}\n")
 
+    # Max days per scalper variant
+    _SCALPER_MAX_DAYS = {
+        "scalper_1m": 3, "scalper_3m": 14, "scalper_5m": 30,
+        "scalper_15m": 30, "scalper": 30,
+    }
+
     all_results = []
     done = 0
 
     for strategy in strategies:
         for coin in coins:
-            for period in periods:
+            effective_periods = periods
+            # In --scalpers mode, use each variant's max period
+            if args.scalpers and periods == [0]:
+                effective_periods = [_SCALPER_MAX_DAYS.get(strategy, 30)]
+
+            for period in effective_periods:
                 done += 1
                 name = STRATEGY_NAMES.get(strategy, strategy)
                 coin_label = COIN_LABELS.get(coin, coin)

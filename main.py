@@ -541,7 +541,7 @@ async def run_backtest(req: BacktestRequest):
     if req.coin not in ["bitcoin", "ethereum", "binancecoin", "cardano",
                         "solana", "ripple", "polkadot", "dogecoin"]:
         raise HTTPException(status_code=400, detail=f"Unsupported coin: {req.coin}")
-    if req.period_days not in [7, 14, 30, 90, 180, 365]:
+    if req.period_days not in [1, 3, 7, 14, 30, 90, 180, 365]:
         raise HTTPException(status_code=400, detail="Period must be 7, 14, 30, 90, 180, or 365 days")
     if req.initial_balance < 50:
         raise HTTPException(status_code=400, detail="Minimum balance is $50")

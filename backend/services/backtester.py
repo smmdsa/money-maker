@@ -42,6 +42,18 @@ COIN_NAMES = {
     "polkadot": "Polkadot", "dogecoin": "Dogecoin",
 }
 
+# ── Commission / Fee Model (Binance Futures USDⓈ-M, VIP 0) ─────────────────
+TAKER_FEE_PCT = 0.05     # 0.05% per side (market orders)
+MAKER_FEE_PCT = 0.02     # 0.02% per side (limit orders)
+FUNDING_RATE_PCT = 0.01  # 0.01% every 8 hours (typical)
+FUNDING_INTERVAL_H = 8   # funding rate applied every N hours
+
+# Interval → hours per candle (for funding rate calculation)
+_INTERVAL_HOURS = {
+    "1m": 1/60, "3m": 3/60, "5m": 5/60, "15m": 15/60, "30m": 0.5,
+    "1h": 1, "2h": 2, "4h": 4, "6h": 6, "8h": 8, "12h": 12, "1d": 24,
+}
+
 
 # ── Data Classes ────────────────────────────────────────────────────────────
 
@@ -56,6 +68,7 @@ class BacktestTrade:
     leverage: int
     total_value: float
     profit_loss: float = 0.0
+    commission: float = 0.0    # fee paid on this trade
     reason: str = ""
 
 
@@ -69,9 +82,14 @@ class BacktestResult:
     period_days: int
     leverage: int
     initial_balance: float
-    final_balance: float
-    total_return_pct: float
+    final_balance: float           # net (after fees)
+    final_balance_gross: float     # gross (no fees)
+    total_return_pct: float        # net
+    total_return_gross_pct: float   # gross
     buy_hold_return_pct: float
+    total_commissions: float       # total trading fees paid
+    total_funding: float           # total funding rate paid
+    total_fees: float              # commissions + funding
     max_drawdown_pct: float
     sharpe_ratio: float
     win_rate: float
@@ -83,7 +101,7 @@ class BacktestResult:
     profit_factor: float
     max_consecutive_wins: int
     max_consecutive_losses: int
-    equity_curve: List[Dict]   # [{time (epoch), equity, buy_hold}]
+    equity_curve: List[Dict]   # [{time (epoch), equity, equity_gross, buy_hold}]
     trades: List[Dict]         # serialized BacktestTrade list
     candles_processed: int
     start_date: str
@@ -154,18 +172,39 @@ def _fetch_klines(coin: str, interval: str, limit: int) -> List[Dict]:
     return all_klines
 
 
+# Map of scalper variants to their native candle interval + max backtest days
+_SCALPER_INTERVALS = {
+    "scalper_1m":  ("1m",  1440, 3),    # 1440 candles/day, max 3d
+    "scalper_3m":  ("3m",  480,  14),   # 480 candles/day,  max 14d
+    "scalper_5m":  ("5m",  288,  30),   # 288 candles/day,  max 30d
+    "scalper_15m": ("15m", 96,   90),   # 96 candles/day,   max 90d
+    "scalper":     ("1h",  24,   180),  # 24 candles/day,   max 180d
+}
+
+
 def _get_kline_config(period_days: int, strategy_key: str = "") -> tuple:
     """Choose interval and total candles needed for backtesting.
-    Scalper strategies use 1h for max resolution (up to 180d).
+    Scalper variants use their native timeframe interval.
     Other strategies use 4h for medium periods, 1d for long.
     """
+    # Check if this is a scalper variant with a specific interval
+    scalper_cfg = _SCALPER_INTERVALS.get(strategy_key)
+    if scalper_cfg:
+        interval, candles_per_day, max_days = scalper_cfg
+        capped_days = min(period_days, max_days)
+        if capped_days < period_days:
+            logger.warning(
+                f"Backtest: {strategy_key} capped from {period_days}d to {capped_days}d "
+                f"(max for {interval} candles)"
+            )
+        return interval, capped_days * candles_per_day
+
     style = STRATEGIES.get(strategy_key, None)
     is_fast = style and style.style in ("scalping",)
 
     if period_days <= 7:
         return "1h", period_days * 24
     elif is_fast and period_days <= 180:
-        # Scalper needs fine-grained candles to catch quick RSI/BB moves
         return "1h", period_days * 24
     elif period_days <= 90:
         return "4h", period_days * 6
@@ -219,26 +258,39 @@ class Backtester:
 
         # --- Fetch historical klines ---
         interval, num_candles = _get_kline_config(period_days, strategy_key)
-        # We need extra candles for indicator warm-up (55 candles for EMA-55)
-        warmup = 60
+        # We need extra candles for indicator warm-up
+        # EMA-55 needs ~55, ADX needs ~2*14+1=29, MACD needs ~35
+        warmup = 100
         klines = _fetch_klines(coin, interval, num_candles + warmup)
 
         if len(klines) < warmup + 20:
             raise ValueError(f"Not enough data: got {len(klines)} candles, need {warmup + 20}+")
 
         # --- Simulation state ---
-        balance = initial_balance
+        balance = initial_balance        # net balance (with fees)
+        balance_gross = initial_balance  # gross balance (no fees)
         position: Optional[_Position] = None
         trades: List[BacktestTrade] = []
         equity_curve: List[Dict] = []
         peak_equity = initial_balance
         max_drawdown = 0.0
+        total_commissions = 0.0
+        total_funding = 0.0
+
+        # Funding rate tracking
+        hours_per_candle = _INTERVAL_HOURS.get(interval, 1)
+        candles_per_funding = FUNDING_INTERVAL_H / hours_per_candle if hours_per_candle > 0 else 999999
+        candles_since_funding = 0.0
 
         # Buy & hold reference
         first_price = klines[warmup]["close"]
         last_price = klines[-1]["close"]
 
         # --- Main loop: iterate candle by candle ---
+        # Use a sliding window for indicator computation (O(n) instead of O(n²))
+        # 200 candles is enough for all indicators (longest: EMA-55 + ADX warm-up)
+        indicator_window = 200
+
         for i in range(warmup, len(klines)):
             candle = klines[i]
             close = candle["close"]
@@ -246,9 +298,10 @@ class Backtester:
             low = candle["low"]
             ts = candle["timestamp"]
 
-            # Build close price series up to this candle
-            close_prices = [k["close"] for k in klines[:i + 1]]
-            ohlc_slice = klines[:i + 1]
+            # Sliding window: only last N candles for indicator computation
+            window_start = max(0, i + 1 - indicator_window)
+            close_prices = [k["close"] for k in klines[window_start:i + 1]]
+            ohlc_slice = klines[window_start:i + 1]
 
             # --- Check SL / TP / Liquidation on current candle ---
             if position:
@@ -256,9 +309,22 @@ class Backtester:
                     position, high, low, close, ts,
                     balance, trades
                 )
-                if closed:
-                    balance += closed
+                if closed is not None:
+                    cash_back, cash_back_gross, close_fee = closed
+                    balance += cash_back
+                    balance_gross += cash_back_gross
+                    total_commissions += close_fee
                     position = None
+
+            # --- Funding rate (every 8h on open position value) ---
+            if position:
+                candles_since_funding += 1
+                if candles_since_funding >= candles_per_funding:
+                    candles_since_funding = 0.0
+                    position_value = position.amount * close
+                    funding_fee = position_value * (FUNDING_RATE_PCT / 100)
+                    balance -= funding_fee
+                    total_funding += funding_fee
 
             # --- Compute indicators ---
             try:
@@ -279,18 +345,21 @@ class Backtester:
             # --- Act on signal ---
             if position is None and signal.direction in ("long", "short"):
                 if signal.confidence >= cfg.min_confidence:
-                    position = self._open_position(
+                    result = self._open_position(
                         signal, close, leverage, strategy_key,
                         balance, ts, trades
                     )
-                    if position:
-                        balance -= position.margin
+                    if result:
+                        position, open_fee = result
+                        balance -= position.margin + open_fee
+                        balance_gross -= position.margin
+                        total_commissions += open_fee
 
             elif position and signal.direction in ("close_long", "close_short"):
                 # Only honour signal-based close for non-scalper strategies
-                # Scalper relies purely on mechanical SL/TP exits
-                if strategy_key == "scalper":
-                    pass  # ignore signal closes for scalper
+                # All scalper variants rely purely on mechanical SL/TP exits
+                if strategy_key.startswith("scalper"):
+                    pass  # ignore signal closes for scalper variants
                 else:
                     curr_pnl = self._calc_pnl(position, close)
                     should_close = (
@@ -298,26 +367,42 @@ class Backtester:
                         or curr_pnl > 0
                     )
                     if should_close:
-                        cash_back = max(position.margin + curr_pnl, 0)
+                        curr_pnl = self._calc_pnl(position, close)
+                        close_value = position.amount * close
+                        close_fee = close_value * (TAKER_FEE_PCT / 100)
+                        net_pnl = curr_pnl - close_fee
+                        cash_back = max(position.margin + net_pnl, 0)
+                        cash_back_gross = max(position.margin + curr_pnl, 0)
                         balance += cash_back
+                        balance_gross += cash_back_gross
+                        total_commissions += close_fee
                         trades.append(BacktestTrade(
                             trade_type=f"close_{position.direction}",
                             timestamp=ts, price=close,
                             amount=position.amount, margin=position.margin,
                             leverage=position.leverage,
-                            total_value=position.amount * close,
-                            profit_loss=curr_pnl,
+                            total_value=close_value,
+                            profit_loss=net_pnl,
+                            commission=close_fee,
                             reason=signal.reasoning,
                         ))
                         position = None
 
             # --- Record equity ---
             equity = balance
+            equity_gross = balance_gross
             if position:
-                equity += position.margin + self._calc_pnl(position, close)
+                pos_pnl = self._calc_pnl(position, close)
+                equity += position.margin + pos_pnl
+                equity_gross += position.margin + pos_pnl
 
             bh_equity = initial_balance * (close / first_price)
-            equity_curve.append({"timestamp": ts, "equity": round(equity, 2), "buy_hold": round(bh_equity, 2)})
+            equity_curve.append({
+                "timestamp": ts,
+                "equity": round(equity, 2),
+                "equity_gross": round(equity_gross, 2),
+                "buy_hold": round(bh_equity, 2),
+            })
 
             if equity > peak_equity:
                 peak_equity = equity
@@ -328,23 +413,33 @@ class Backtester:
         # --- Force close any open position at end ---
         if position:
             pnl = self._calc_pnl(position, last_price)
-            cash_back = max(position.margin + pnl, 0)
+            close_value = position.amount * last_price
+            close_fee = close_value * (TAKER_FEE_PCT / 100)
+            net_pnl = pnl - close_fee
+            cash_back = max(position.margin + net_pnl, 0)
+            cash_back_gross = max(position.margin + pnl, 0)
             balance += cash_back
+            balance_gross += cash_back_gross
+            total_commissions += close_fee
             trades.append(BacktestTrade(
                 trade_type=f"close_{position.direction}",
                 timestamp=klines[-1]["timestamp"], price=last_price,
                 amount=position.amount, margin=position.margin,
                 leverage=position.leverage,
-                total_value=position.amount * last_price,
-                profit_loss=pnl,
+                total_value=close_value,
+                profit_loss=net_pnl,
+                commission=close_fee,
                 reason="Backtest end — force close",
             ))
             position = None
 
         # --- Compute metrics ---
         final_equity = balance
+        final_equity_gross = balance_gross
         total_return = (final_equity - initial_balance) / initial_balance * 100
+        total_return_gross = (final_equity_gross - initial_balance) / initial_balance * 100
         buy_hold_return = (last_price - first_price) / first_price * 100
+        total_fees = total_commissions + total_funding
 
         close_trades = [t for t in trades if t.trade_type.startswith("close_")]
         wins = [t for t in close_trades if t.profit_loss > 0]
@@ -379,8 +474,13 @@ class Backtester:
             leverage=leverage,
             initial_balance=initial_balance,
             final_balance=round(final_equity, 2),
+            final_balance_gross=round(final_equity_gross, 2),
             total_return_pct=round(total_return, 2),
+            total_return_gross_pct=round(total_return_gross, 2),
             buy_hold_return_pct=round(buy_hold_return, 2),
+            total_commissions=round(total_commissions, 2),
+            total_funding=round(total_funding, 2),
+            total_fees=round(total_fees, 2),
             max_drawdown_pct=round(max_drawdown, 2),
             sharpe_ratio=round(sharpe, 3),
             win_rate=round(win_rate, 1),
@@ -396,6 +496,7 @@ class Backtester:
                 {
                     "time": int(datetime.fromisoformat(e["timestamp"]).timestamp()),
                     "equity": e["equity"],
+                    "equity_gross": e.get("equity_gross"),
                     "buy_hold": e.get("buy_hold"),
                 }
                 for e in equity_curve_sampled
@@ -411,6 +512,7 @@ class Backtester:
                 "leverage": t.leverage,
                 "total_value": round(t.total_value, 2),
                 "pnl": round(t.profit_loss, 2) if t.trade_type.startswith("close") else None,
+                "commission": round(t.commission, 4),
                 "reason": t.reason,
             } for t in trades],
             candles_processed=len(klines) - warmup,
@@ -420,7 +522,9 @@ class Backtester:
 
         logger.info(
             f"Backtest {strategy_key} on {coin} ({period_days}d, {leverage}x): "
-            f"{total_return:+.2f}% return, {len(close_trades)} trades, "
+            f"gross {total_return_gross:+.2f}% / net {total_return:+.2f}% return, "
+            f"{len(close_trades)} trades, fees ${total_fees:.2f} "
+            f"(comm ${total_commissions:.2f} + fund ${total_funding:.2f}), "
             f"{win_rate:.0f}% win rate, {max_drawdown:.1f}% max DD"
         )
 
@@ -432,8 +536,8 @@ class Backtester:
         self, signal: Signal, price: float, leverage: int,
         strategy_key: str, balance: float, ts: str,
         trades: List[BacktestTrade],
-    ) -> Optional[_Position]:
-        """Open a simulated position. Returns the Position or None."""
+    ) -> Optional[tuple]:
+        """Open a simulated position. Returns (Position, fee) or None."""
         margin = calculate_position_size(
             balance, strategy_key, leverage,
             signal.stop_loss_pct, price
@@ -444,6 +548,9 @@ class Backtester:
         position_value = margin * leverage
         amount = position_value / price
         direction = signal.direction
+
+        # Commission on entry
+        open_fee = position_value * (TAKER_FEE_PCT / 100)
 
         liq = calculate_liquidation_price(price, leverage, direction)
         if direction == "long":
@@ -459,10 +566,11 @@ class Backtester:
             amount=amount, margin=margin,
             leverage=leverage,
             total_value=position_value,
+            commission=open_fee,
             reason=signal.reasoning,
         ))
 
-        return _Position(
+        pos = _Position(
             direction=direction,
             entry_price=price,
             amount=amount,
@@ -475,15 +583,17 @@ class Backtester:
             best_price=price,
             opened_at=ts,
         )
+        return pos, open_fee
 
     def _check_position_exit(
         self, pos: _Position, high: float, low: float,
         close: float, ts: str,
         balance: float, trades: List[BacktestTrade],
-    ) -> Optional[float]:
+    ) -> Optional[tuple]:
         """Check if position should be closed by SL/TP/liquidation.
-        Simple fixed SL/TP — no trailing stop.
-        Returns cash returned to balance if closed, else None.
+        Returns (net_cash_back, gross_cash_back) tuple if closed, else None.
+        net_cash_back = margin + pnl - close_fee
+        gross_cash_back = margin + pnl (no fee)
         """
         exit_price = None
         reason = ""
@@ -519,17 +629,24 @@ class Backtester:
         if exit_price is None:
             return None
 
-        cash_back = max(pos.margin + pnl, 0)
+        # Commission on close
+        close_value = pos.amount * exit_price
+        close_fee = close_value * (TAKER_FEE_PCT / 100)
+        net_pnl = pnl - close_fee
+
+        cash_back = max(pos.margin + net_pnl, 0)
+        cash_back_gross = max(pos.margin + pnl, 0)
         trades.append(BacktestTrade(
             trade_type=f"close_{pos.direction}",
             timestamp=ts, price=exit_price,
             amount=pos.amount, margin=pos.margin,
             leverage=pos.leverage,
-            total_value=pos.amount * exit_price,
-            profit_loss=pnl,
+            total_value=close_value,
+            profit_loss=net_pnl,
+            commission=close_fee,
             reason=reason,
         ))
-        return cash_back
+        return cash_back, cash_back_gross, close_fee
 
     @staticmethod
     def _calc_pnl(pos: _Position, price: float) -> float:

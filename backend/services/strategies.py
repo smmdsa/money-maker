@@ -48,13 +48,13 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     "trend_rider": StrategyConfig(
         key="trend_rider",
         name="Trend Rider",
-        description="Follows strong trends using EMA alignment + ADX. "
-                    "Rides the trend with trailing stops. Best in trending markets.",
+        description="Follows strong trends using EMA alignment + ADX + pullback entries. "
+                    "6-layer signal architecture with 3:1 R:R. Best in trending markets.",
         style="trend",
         default_leverage=3,
         max_leverage=5,
         max_positions=3,
-        risk_per_trade_pct=2.0,
+        risk_per_trade_pct=2.5,
         min_confidence=0.55,
     ),
     "mean_reversion": StrategyConfig(
@@ -84,7 +84,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     "scalper": StrategyConfig(
         key="scalper",
         name="Scalper Pro",
-        description="Trend-following pullback scalping. Enters pullbacks within "
+        description="Trend-following pullback scalping (1h candles). Enters pullbacks within "
                     "short-term trends using EMA alignment + RSI + BB confluence. "
                     "ATR-adaptive stops. Profits in any market.",
         style="scalping",
@@ -92,6 +92,54 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_leverage=10,
         max_positions=5,
         risk_per_trade_pct=4.0,
+        min_confidence=0.50,
+    ),
+    "scalper_1m": StrategyConfig(
+        key="scalper_1m",
+        name="Scalper Pro 1m",
+        description="Ultra-fast 1-minute scalper. Same 6-layer trend-pullback logic "
+                    "on 1m candles. Extremely tight ATR stops. Best for high-frequency.",
+        style="scalping",
+        default_leverage=10,
+        max_leverage=20,
+        max_positions=5,
+        risk_per_trade_pct=2.0,
+        min_confidence=0.50,
+    ),
+    "scalper_3m": StrategyConfig(
+        key="scalper_3m",
+        name="Scalper Pro 3m",
+        description="Fast 3-minute scalper. 6-layer trend-pullback logic on 3m candles. "
+                    "Good balance between speed and signal quality.",
+        style="scalping",
+        default_leverage=8,
+        max_leverage=15,
+        max_positions=5,
+        risk_per_trade_pct=2.5,
+        min_confidence=0.50,
+    ),
+    "scalper_5m": StrategyConfig(
+        key="scalper_5m",
+        name="Scalper Pro 5m",
+        description="Classic 5-minute scalper. 6-layer trend-pullback logic on 5m candles. "
+                    "Standard daytrading timeframe with solid signal quality.",
+        style="scalping",
+        default_leverage=7,
+        max_leverage=12,
+        max_positions=5,
+        risk_per_trade_pct=3.0,
+        min_confidence=0.50,
+    ),
+    "scalper_15m": StrategyConfig(
+        key="scalper_15m",
+        name="Scalper Pro 15m",
+        description="Swing scalper on 15-minute candles. Same 6-layer logic with wider ATR stops. "
+                    "Fewer trades, higher quality entries.",
+        style="scalping",
+        default_leverage=6,
+        max_leverage=10,
+        max_positions=5,
+        risk_per_trade_pct=3.5,
         min_confidence=0.50,
     ),
     "grid_trader": StrategyConfig(
@@ -449,6 +497,10 @@ class StrategyEngine:
             "mean_reversion": self._mean_reversion,
             "momentum_sniper": self._momentum_sniper,
             "scalper": self._scalper,
+            "scalper_1m": self._scalper,
+            "scalper_3m": self._scalper,
+            "scalper_5m": self._scalper,
+            "scalper_15m": self._scalper,
             "grid_trader": self._grid_trader,
             "confluence_master": self._confluence_master,
         }
@@ -466,82 +518,184 @@ class StrategyEngine:
                      has_long: bool, has_short: bool,
                      entry_price: float) -> Signal:
         """
-        Paul Tudor Jones / Trend Following.
-        Uses EMA alignment (9 > 21 > 55) + ADX for trend strength.
-        LONG in uptrends, SHORT in downtrends.
-        Trailing stop at 2x ATR.
+        Paul Tudor Jones / Trend Following — v2.
+
+        Philosophy:
+        - Only trade WITH the dominant trend (EMA 9>21>55)
+        - Wait for a pullback within the trend to enter (RSI dip/bounce)
+        - Use ADX to confirm trend strength (avoid choppy markets)
+        - MACD crossover as momentum catalyst
+        - BB position for pullback timing
+        - Volume + StochRSI as final confirmation layers
+        - ATR-adaptive stops with 3:1 R:R
+        - Counter-trend penalty to avoid whipsaws
         """
         reasons = []
         long_score = 0
         short_score = 0
         cfg = STRATEGIES["trend_rider"]
 
-        # EMA alignment
         ema9 = ind.get("ema_9")
         ema21 = ind.get("ema_21")
         ema55 = ind.get("ema_55")
-
-        if ema9 and ema21 and ema55:
-            if ema9 > ema21 > ema55:
-                long_score += 3
-                reasons.append("EMA 9>21>55 bullish alignment")
-            elif ema9 < ema21 < ema55:
-                short_score += 3
-                reasons.append("EMA 9<21<55 bearish alignment")
-            elif ema9 > ema21:
-                long_score += 1
-                reasons.append("EMA 9>21 short-term bullish")
-            elif ema9 < ema21:
-                short_score += 1
-                reasons.append("EMA 9<21 short-term bearish")
-
-        # ADX trend strength
         adx = ind.get("adx")
+        macd = ind.get("macd")
+        rsi = ind.get("rsi")
+        bb = ind.get("bb")
+        stoch = ind.get("stoch_rsi")
+        vol = ind.get("volume")
+        mom = ind.get("momentum", 0)
+        atr_pct = ind.get("atr_pct") or 3.0
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 1: Dominant Trend Filter (EMA alignment)
+        #   This is the GATE — we only trade in the trend direction
+        #   Partial alignment is just a filter (+1 pt)
+        #   Full alignment (9>21>55) is a quality signal (+2 more pts)
+        # ═══════════════════════════════════════════════════════════════
+        trend_up = False
+        trend_down = False
+
+        if ema9 and ema21:
+            if ema9 > ema21:
+                trend_up = True
+                long_score += 1
+            else:
+                trend_down = True
+                short_score += 1
+
+            # Full alignment (9>21>55) = confirmed trend — award points
+            if ema55:
+                if ema9 > ema21 > ema55:
+                    long_score += 2
+                    reasons.append("EMA 9>21>55 bullish alignment")
+                elif ema9 < ema21 < ema55:
+                    short_score += 2
+                    reasons.append("EMA 9<21<55 bearish alignment")
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 2: ADX Trend Strength (quality filter)
+        #   Strong trend = high conviction; weak/no trend = skip
+        # ═══════════════════════════════════════════════════════════════
         if adx:
-            if adx["strong_trend"]:
-                # Amplify the dominant direction
+            if adx["strong_trend"]:  # ADX > 30
                 if adx["plus_di"] > adx["minus_di"]:
                     long_score += 2
                     reasons.append(f"Strong uptrend ADX {adx['adx']:.0f}")
                 else:
                     short_score += 2
                     reasons.append(f"Strong downtrend ADX {adx['adx']:.0f}")
-            elif adx["trending"]:
+            elif adx["trending"]:  # ADX 20-30
                 if adx["plus_di"] > adx["minus_di"]:
                     long_score += 1
                 else:
                     short_score += 1
                 reasons.append(f"Moderate trend ADX {adx['adx']:.0f}")
             else:
-                reasons.append(f"Weak trend ADX {adx['adx']:.0f} — caution")
+                # Weak trend — penalize both sides to avoid choppy entries
+                long_score = max(0, long_score - 2)
+                short_score = max(0, short_score - 2)
+                reasons.append(f"Weak trend ADX {adx['adx']:.0f} — reduced")
 
-        # MACD confirmation
-        macd = ind.get("macd")
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 3: Pullback Entry (RSI in trend direction)
+        #   Don't chase — wait for RSI to dip/bounce before entering
+        # ═══════════════════════════════════════════════════════════════
+        if rsi is not None:
+            # In uptrend: RSI pullback to 35-48 = buying opportunity
+            if trend_up and 35 <= rsi <= 48:
+                long_score += 2
+                reasons.append(f"Uptrend pullback: RSI {rsi:.0f}")
+            # In downtrend: RSI bounce to 52-65 = shorting opportunity
+            elif trend_down and 52 <= rsi <= 65:
+                short_score += 2
+                reasons.append(f"Downtrend bounce: RSI {rsi:.0f}")
+            # Chasing warning: RSI already extended in trend direction
+            elif trend_up and rsi > 72:
+                long_score = max(0, long_score - 1)
+                reasons.append(f"RSI overextended {rsi:.0f} — avoid chasing")
+            elif trend_down and rsi < 28:
+                short_score = max(0, short_score - 1)
+                reasons.append(f"RSI overextended {rsi:.0f} — avoid chasing")
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 4: MACD Momentum Catalyst
+        #   Crossover is a strong trigger; histogram direction confirms
+        # ═══════════════════════════════════════════════════════════════
         if macd:
-            if macd["crossover"] == "bullish":
+            crossover = macd.get("crossover", "none")
+            hist = macd.get("histogram", 0)
+            if crossover == "bullish":
                 long_score += 2
                 reasons.append("MACD bullish crossover")
-            elif macd["crossover"] == "bearish":
+            elif crossover == "bearish":
                 short_score += 2
                 reasons.append("MACD bearish crossover")
-            elif macd["histogram"] > 0:
+            elif hist > 0 and long_score > short_score:
                 long_score += 1
-            else:
+            elif hist < 0 and short_score > long_score:
                 short_score += 1
 
-        # Momentum
-        mom = ind.get("momentum", 0)
-        if mom > 3:
-            long_score += 1
-            reasons.append(f"Positive momentum +{mom:.1f}%")
-        elif mom < -3:
-            short_score += 1
-            reasons.append(f"Negative momentum {mom:.1f}%")
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 5: BB Pullback Timing + StochRSI
+        #   Price near lower BB in uptrend = pullback to support (buy)
+        #   StochRSI crossover from oversold = precision trigger
+        # ═══════════════════════════════════════════════════════════════
+        if bb:
+            if trend_up and bb["pct_b"] < 0.30:
+                long_score += 1
+                reasons.append(f"Price near lower BB ({bb['pct_b']:.2f}) — pullback support")
+            elif trend_down and bb["pct_b"] > 0.70:
+                short_score += 1
+                reasons.append(f"Price near upper BB ({bb['pct_b']:.2f}) — bounce resistance")
 
-        # ATR-based stop loss
-        atr_pct = ind.get("atr_pct") or 3.0
-        sl = max(atr_pct * 2, 2.0)
-        tp = max(atr_pct * 4, 6.0)
+        if stoch:
+            if stoch["k"] > stoch["d"] and stoch["oversold"]:
+                long_score += 1
+                reasons.append("StochRSI cross up from oversold")
+            elif stoch["k"] < stoch["d"] and stoch["overbought"]:
+                short_score += 1
+                reasons.append("StochRSI cross down from overbought")
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 6: Volume Confirmation
+        # ═══════════════════════════════════════════════════════════════
+        if vol and vol.get("increasing"):
+            if long_score > short_score:
+                long_score += 1
+                reasons.append("Volume increasing")
+            elif short_score > long_score:
+                short_score += 1
+                reasons.append("Volume increasing")
+
+        # ═══════════════════════════════════════════════════════════════
+        # COUNTER-TREND PENALTY
+        #   Fighting the dominant trend is a losing game
+        # ═══════════════════════════════════════════════════════════════
+        if trend_up and short_score > long_score:
+            short_score = max(0, short_score - 2)
+        if trend_down and long_score > short_score:
+            long_score = max(0, long_score - 2)
+
+        # ═══════════════════════════════════════════════════════════════
+        # HARD GATE: Require full EMA alignment for new entries
+        #   Trend Rider should only enter confirmed trends (9>21>55).
+        #   Without full alignment, cap scores below entry threshold
+        #   so no new positions open. Existing positions can still close.
+        # ═══════════════════════════════════════════════════════════════
+        full_alignment = (ema55 is not None and ema9 is not None and ema21 is not None
+                          and ((ema9 > ema21 > ema55) or (ema9 < ema21 < ema55)))
+        if not full_alignment:
+            long_score = min(long_score, 2)
+            short_score = min(short_score, 2)
+
+        # ═══════════════════════════════════════════════════════════════
+        # STOPS: ATR-adaptive with 3:1 R:R
+        #   Wider SL than Scalper (1.5×ATR) because trends need room to breathe
+        #   TP at 4.5×ATR = 3:1 ratio
+        # ═══════════════════════════════════════════════════════════════
+        sl = max(atr_pct * 1.5, 1.5)
+        tp = max(atr_pct * 4.5, sl * 3.0)
 
         return self._build_signal(
             long_score, short_score, reasons, cfg,

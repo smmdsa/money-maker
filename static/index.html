@@ -900,7 +900,11 @@
                         <option value="trend_rider">Trend Rider</option>
                         <option value="mean_reversion">Mean Reversion</option>
                         <option value="momentum_sniper">Momentum Sniper</option>
-                        <option value="scalper">Scalper Pro</option>
+                        <option value="scalper">Scalper Pro (1h)</option>
+                        <option value="scalper_1m">Scalper Pro 1m</option>
+                        <option value="scalper_3m">Scalper Pro 3m</option>
+                        <option value="scalper_5m">Scalper Pro 5m</option>
+                        <option value="scalper_15m">Scalper Pro 15m</option>
                         <option value="grid_trader">Grid Trader</option>
                         <option value="confluence_master" selected>Confluence Master</option>
                     </select>
@@ -923,10 +927,12 @@
                 <div class="form-group">
                     <label>Period</label>
                     <select id="btPeriod" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                        <option value="1">1 Day</option>
+                        <option value="3">3 Days</option>
                         <option value="7">7 Days</option>
                         <option value="14">14 Days</option>
-                        <option value="30">30 Days</option>
-                        <option value="90" selected>90 Days</option>
+                        <option value="30" selected>30 Days</option>
+                        <option value="90">90 Days</option>
                         <option value="180">180 Days</option>
                         <option value="365">1 Year</option>
                     </select>
@@ -975,6 +981,7 @@
                                 <th>Margin</th>
                                 <th>Size</th>
                                 <th>P/L</th>
+                                <th>Fee</th>
                                 <th>Reason</th>
                             </tr>
                         </thead>
@@ -1674,9 +1681,19 @@
 
             // ── Metric Cards ──
             const grid = document.getElementById('btMetricsGrid');
+            const grossRet = data.total_return_gross_pct ?? data.total_return_pct;
+            const netRet = data.total_return_pct;
+            const totalFees = data.total_fees ?? 0;
+            const totalComm = data.total_commissions ?? 0;
+            const totalFunding = data.total_funding ?? 0;
+            const finalGross = data.final_balance_gross ?? data.final_balance;
             const m = [
-                { label: 'Total Return', value: (data.total_return_pct >= 0 ? '+' : '') + data.total_return_pct.toFixed(2) + '%',
-                  color: data.total_return_pct >= 0 ? '#4caf50' : '#f44336' },
+                { label: 'Gross Return', value: (grossRet >= 0 ? '+' : '') + grossRet.toFixed(2) + '%',
+                  color: grossRet >= 0 ? '#4caf50' : '#f44336' },
+                { label: 'Net Return', value: (netRet >= 0 ? '+' : '') + netRet.toFixed(2) + '%',
+                  color: netRet >= 0 ? '#4caf50' : '#f44336' },
+                { label: 'Total Fees', value: '$' + totalFees.toFixed(2),
+                  color: '#f44336', tooltip: `Comms: $${totalComm.toFixed(2)} | Funding: $${totalFunding.toFixed(2)}` },
                 { label: 'Buy & Hold', value: (data.buy_hold_return_pct >= 0 ? '+' : '') + data.buy_hold_return_pct.toFixed(2) + '%',
                   color: data.buy_hold_return_pct >= 0 ? '#4caf50' : '#f44336' },
                 { label: 'Max Drawdown', value: data.max_drawdown_pct.toFixed(2) + '%', color: '#f44336' },
@@ -1687,11 +1704,11 @@
                 { label: 'Profit Factor', value: data.profit_factor.toFixed(2),
                   color: data.profit_factor >= 1 ? '#4caf50' : '#f44336' },
                 { label: 'Trades', value: data.total_trades, color: '#2196f3' },
-                { label: 'Final Balance', value: '$' + data.final_balance.toLocaleString('en-US', {maximumFractionDigits: 2}),
+                { label: 'Net Balance', value: '$' + data.final_balance.toLocaleString('en-US', {maximumFractionDigits: 2}),
                   color: data.final_balance >= data.initial_balance ? '#4caf50' : '#f44336' },
             ];
             grid.innerHTML = m.map(i => `
-                <div class="card" style="text-align:center;padding:14px 10px;">
+                <div class="card" style="text-align:center;padding:14px 10px;"${i.tooltip ? ` title="${i.tooltip}"` : ''}>
                     <div style="font-size:0.82em;color:#777;margin-bottom:4px;">${i.label}</div>
                     <div style="font-size:1.4em;font-weight:700;color:${i.color};">${i.value}</div>
                 </div>
@@ -1706,6 +1723,7 @@
             tbody.innerHTML = data.trades.map(t => {
                 const pl = t.pnl != null ? (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2) : '—';
                 const plColor = t.pnl == null ? '#999' : (t.pnl >= 0 ? '#4caf50' : '#f44336');
+                const fee = t.commission != null ? '$' + t.commission.toFixed(2) : '—';
                 const d = new Date(t.timestamp * 1000);
                 const badge = t.side === 'LONG'
                     ? '<span style="color:#4caf50;font-weight:700;">LONG</span>'
@@ -1717,6 +1735,7 @@
                     <td>$${t.margin ? t.margin.toFixed(2) : '—'}</td>
                     <td>${t.size ? t.size.toFixed(6) : '—'}</td>
                     <td style="color:${plColor};font-weight:600;">${pl}</td>
+                    <td style="color:#f44336;font-size:0.9em;">${fee}</td>
                     <td style="font-size:0.85em;color:#888;">${t.reason || ''}</td>
                 </tr>`;
             }).join('');
@@ -1743,16 +1762,21 @@
             });
 
             const equitySeries = btChart.addLineSeries({
-                color: '#2196f3', lineWidth: 2, title: 'Strategy'
+                color: '#2196f3', lineWidth: 2, title: 'Net'
+            });
+            const grossSeries = btChart.addLineSeries({
+                color: '#9c27b0', lineWidth: 1, lineStyle: 2, title: 'Gross'
             });
             const bhSeries = btChart.addLineSeries({
                 color: '#ff9800', lineWidth: 1, lineStyle: 2, title: 'Buy & Hold'
             });
 
             const equityData = curve.map(p => ({ time: p.time, value: p.equity }));
+            const grossData = curve.filter(p => p.equity_gross != null).map(p => ({ time: p.time, value: p.equity_gross }));
             const bhData = curve.filter(p => p.buy_hold != null).map(p => ({ time: p.time, value: p.buy_hold }));
 
             equitySeries.setData(equityData);
+            if (grossData.length) grossSeries.setData(grossData);
             if (bhData.length) bhSeries.setData(bhData);
             btChart.timeScale().fitContent();
 
