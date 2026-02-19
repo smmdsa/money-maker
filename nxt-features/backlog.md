@@ -711,23 +711,23 @@ Bot de Telegram y/o email para notificar:
 
 | ID | Feature | Impacto | Estado |
 |----|---------|---------|--------|
-| A1 | Fear & Greed Index (alternative.me) | Medio | Pendiente |
-| A2 | On-chain data (whale movements, exchange flows) | Alto | Pendiente |
+| A1 | Fear & Greed Index (alternative.me) | **Alto** | 🔜 Next (rápido, API gratuita, dato valioso para agente + LLM) |
+| A2 | On-chain data (whale movements, exchange flows) | **Alto** | 🔜 Planificado (#5 del próximo ciclo) |
 | A3 | Correlación entre monedas para diversificación | Medio | Pendiente |
 | A4 | Pattern recognition (double bottom, H&S, etc.) | Medio | Pendiente |
-| A5 | Social sentiment (X/Reddit scraping) | Alto | Pendiente |
-| A6 | Multi-timeframe analysis (1H, 4H, 1D) | Alto | Pendiente |
+| A5 | Social sentiment (X/Reddit scraping) | Medio | Deprioritizado (ya tenemos LLM + RSS news) |
+| A6 | Multi-timeframe analysis (1H, 4H, 1D) | Alto | ✅ Parcial (5 variantes Scalper + backtester multi-period) |
 
 ### Trading / Estrategia
 
 | ID | Feature | Impacto | Estado |
 |----|---------|---------|--------|
-| B1 | DCA automático como estrategia standalone | Medio | Pendiente (no incluido en las 6 elite) |
-| B2 | Detección de oportunidades sin ejecución (alert-only mode) | Medio | Incluido en #5 |
-| B3 | Preparar arquitectura para trading real (Binance/Coinbase API) | Alto | Pendiente |
+| B1 | DCA automático como estrategia standalone | Medio | Pendiente |
+| B2 | Detección de oportunidades sin ejecución (alert-only mode) | Medio | ✅ Parcial (Risk Monitor + Market Clock alerts) |
+| B3 | Preparar arquitectura para trading real (Binance/Coinbase API) | **Alto** | Pendiente (requiere madurez previa) |
 | B4 | Portfolio rebalancing automático | Medio | Pendiente |
-| B5 | Trailing stop-loss dinámico (ATR-based) | Alto | Pendiente |
-| B6 | Trailing take-profit (lock in gains) | Alto | Pendiente |
+| B5 | Trailing stop-loss dinámico (ATR-based) | **Muy Alto** | 🔜 Next (#1 del próximo ciclo) |
+| B6 | Trailing take-profit (lock in gains) | **Muy Alto** | 🔜 Next (#1 — junto con B5) |
 
 ### UX / Dashboard
 
@@ -736,17 +736,17 @@ Bot de Telegram y/o email para notificar:
 | C1 | Comparación lado a lado de múltiples agentes | Medio | Pendiente |
 | C2 | Dark mode | Bajo | Pendiente |
 | C3 | Mobile responsive mejorado | Medio | Pendiente |
-| C4 | Export CSV de trades (análisis externo / impuestos) | Medio | Pendiente |
+| C4 | Export CSV de trades (análisis externo / impuestos) | **Medio-Alto** | 🔜 Planificado (#4 del próximo ciclo) |
 | C5 | Leaderboard / ranking de agentes | Medio | Pendiente |
 
 ### Configuración / Sistema
 
 | ID | Feature | Impacto | Estado |
 |----|---------|---------|--------|
-| D1 | Panel de configuración global (no hardcodeado) | Alto | Pendiente |
+| D1 | Panel de configuración global (no hardcodeado) | Medio | Deprioritizado (Account Profiles resolvió lo urgente) |
 | D2 | Sistema de usuarios / autenticación | Medio | Pendiente |
-| D3 | Persistir configuraciones en DB | Medio | Pendiente |
-| D4 | API rate-limit dashboard (ver uso de APIs) | Bajo | Parcial (health endpoint muestra estado de ambos proveedores) |
+| D3 | Persistir configuraciones en DB | Medio | ✅ Parcial (leverage/risk en DB) |
+| D4 | API rate-limit dashboard (ver uso de APIs) | Bajo | ✅ Parcial (health endpoint muestra estado de ambos proveedores) |
 
 ---
 
@@ -785,9 +785,15 @@ Bot de Telegram y/o email para notificar:
 5b. Open Positions UI (full-width) ──→ ✅ COMPLETADO (2026-02-19)
 5c. Chart Price Sync ──→ ✅ COMPLETADO (2026-02-19)
 5d. Account Profiles (Micro/Small/Std/Large) ──→ ✅ COMPLETADO (2026-02-19)
-5e. Risk Monitor (WebSocket) ──→ planificado (Fase 2)
 7.  Market Clocks (World Markets) ──→ ✅ COMPLETADO (2026-02-19)
-6.  Notificaciones ──→ next (add-on independiente)
+─── Próximo ciclo (Top 5) ───────────────────────────────
+8.  Trailing SL + Trailing TP (B5+B6) ──→ 🔜 next
+9.  Fear & Greed Index (A1) ──→ 🔜 next
+10. Notificaciones Telegram (#6) ──→ 🔜 next
+11. Export CSV de Trades (C4) ──→ 🔜 next
+12. On-chain / Whale Alerts (A2) ──→ 🔜 next
+─── Futuro ──────────────────────────────────────────────
+5e. Risk Monitor (WebSocket) ──→ planificado (Fase 2)
 ```
 
 ---
