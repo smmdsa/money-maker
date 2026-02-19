@@ -4,25 +4,34 @@
 
 ---
 
-## Top 5 — Próximas Features (priorizadas)
+## ✅ Completado
 
-### 1. 📊 Gráficos de Precios con Candlesticks e Indicadores
+### 1. 📊 Gráficos de Precios con Candlesticks e Indicadores — COMPLETADO
 
-**Impacto**: Muy Alto  
-**Área**: UX / Dashboard  
-**Dependencias**: Ninguna (100% frontend)
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-18  
+**Área**: UX / Dashboard + Backend APIs
 
-Integrar [TradingView Lightweight Charts](https://github.com/nickvdyck/lightweight-charts) (open source, ~40KB) para mostrar:
+**Implementación entregada:**
+- **Candlestick chart** con datos OHLC reales (TradingView Lightweight Charts v4)
+- **Indicadores superpuestos**: SMA 7 (azul), SMA 21 (naranja), Bollinger Bands (violeta)
+- **RSI sub-chart** (14 períodos) con líneas de referencia 70/30
+- **Equity curve** del agente (área chart, aparece al seleccionar un agente)
+- **Selector de monedas**: BTC, ETH, BNB, SOL, XRP, ADA, DOT, DOGE
+- **Selector de timeframe**: 1D, 7D, 14D, 30D, 90D, 1Y
+- **Responsive**: ResizeObserver adapta los charts al ancho del contenedor
+- **Sincronización de crosshair** entre candlestick y RSI
+- **Deduplicación** y ordenamiento de datos antes de renderizar
 
-- Candlesticks reales con datos OHLC del endpoint existente `get_ohlc()`
-- Indicadores superpuestos: SMA 7/21, Bollinger Bands
-- RSI en panel secundario
-- Equity curve del portfolio del agente (valor total a lo largo del tiempo)
-- Selector de timeframe: 1D, 7D, 14D, 30D
-
-**Transformación**: De "lista de números" → "herramienta visual de trading real".
+**Archivos creados / modificados:**
+- `static/charts.js` — Módulo completo de charts (~360 líneas)
+- `static/index.html` — Sección de charts con CSS + HTML + wiring JS
+- `backend/models/database.py` — Modelo `PortfolioSnapshot` para equity curve
+- `main.py` — Endpoints `/api/market/{coin}/ohlc`, `/api/market/{coin}/history`, `/api/agents/{agent_id}/equity`
 
 ---
+
+## Próximas Features (priorizadas)
 
 ### 2. ⚙️ Estrategias Configurables por Agente
 
@@ -169,7 +178,7 @@ Bot de Telegram y/o email para notificar:
 ## Orden de Implementación
 
 ```
-1. Gráficos Candlestick ──→ 100% frontend, no bloquea nada
+1. Gráficos Candlestick ──→ ✅ COMPLETADO (2026-02-18)
 2. Estrategias Configurables ──→ mejora lógica core + habilita backtesting
 3. LLM Análisis ──→ requiere API key externa
 4. Backtesting ──→ depende de que estrategias estén definidas

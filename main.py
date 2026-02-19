@@ -363,56 +363,69 @@ async def websocket_endpoint(websocket: WebSocket):
 # Background tasks
 
 async def run_trading_cycle():
-    """Background task to run trading for all active agents"""
+    """Background task to run trading for all active agents.
+    All blocking market/DB calls are offloaded to a thread pool
+    so the asyncio event loop is never blocked.
+    """
     logger.info("Running trading cycle...")
-    
-    try:
-        db = next(get_db())
-        
-        # Fetch real news from APIs
-        news_service.fetch_and_store_news(db)
-        
-        # Get all active agents
-        agents = db.query(TradingAgent).filter(TradingAgent.status == "active").all()
-        
-        for agent in agents:
-            try:
-                # Make trading decision
-                decision = trading_service.make_trading_decision(agent, db)
-                
-                if decision:
-                    # Broadcast update via WebSocket
-                    await manager.broadcast({
-                        "type": "trade_update",
-                        "agent_id": agent.id,
-                        "agent_name": agent.name,
-                        "decision": decision,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
 
-                # Record portfolio snapshot for equity curve
-                portfolio_value = 0
-                for item in agent.portfolio:
-                    price = market_service.get_coin_price(item.cryptocurrency)
-                    if price:
-                        portfolio_value += item.amount * price
+    def _sync_trading_cycle():
+        """Synchronous work executed in a thread pool."""
+        try:
+            db = next(get_db())
 
-                snapshot = PortfolioSnapshot(
-                    agent_id=agent.id,
-                    total_value=agent.current_balance + portfolio_value,
-                    cash_balance=agent.current_balance,
-                    portfolio_value=portfolio_value
-                )
-                db.add(snapshot)
-                
-            except Exception as e:
-                logger.error(f"Error processing agent {agent.id}: {e}")
+            # Fetch real news from APIs
+            news_service.fetch_and_store_news(db)
 
-        db.commit()
-        db.close()
-        
-    except Exception as e:
-        logger.error(f"Error in trading cycle: {e}")
+            # Get all active agents
+            agents = db.query(TradingAgent).filter(TradingAgent.status == "active").all()
+
+            decisions_made = []
+            for agent in agents:
+                try:
+                    # Make trading decision
+                    decision = trading_service.make_trading_decision(agent, db)
+                    if decision:
+                        decisions_made.append((agent.id, agent.name, decision))
+
+                    # Record portfolio snapshot for equity curve
+                    portfolio_value = 0
+                    for item in agent.portfolio:
+                        price = market_service.get_coin_price(item.cryptocurrency)
+                        if price:
+                            portfolio_value += item.amount * price
+
+                    snapshot = PortfolioSnapshot(
+                        agent_id=agent.id,
+                        total_value=agent.current_balance + portfolio_value,
+                        cash_balance=agent.current_balance,
+                        portfolio_value=portfolio_value
+                    )
+                    db.add(snapshot)
+
+                except Exception as e:
+                    logger.error(f"Error processing agent {agent.id}: {e}")
+
+            db.commit()
+            db.close()
+            return decisions_made
+
+        except Exception as e:
+            logger.error(f"Error in trading cycle: {e}")
+            return []
+
+    # Run all blocking I/O in a thread so we don't block the event loop
+    decisions = await asyncio.to_thread(_sync_trading_cycle)
+
+    # Broadcast results back on the event loop
+    for agent_id, agent_name, decision in (decisions or []):
+        await manager.broadcast({
+            "type": "trade_update",
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "decision": decision,
+            "timestamp": datetime.utcnow().isoformat()
+        })
 
 
 @app.get("/api/health")
