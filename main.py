@@ -18,6 +18,7 @@ from backend.services.trading_agent import TradingAgentService
 from backend.services.news_service import NewsService
 from backend.services.llm_service import LLMService
 from backend.services.strategies import STRATEGIES
+from backend.services.backtester import Backtester
 from pydantic import BaseModel
 
 # Configure logging
@@ -32,6 +33,7 @@ market_service = MarketDataService()
 llm_service = LLMService()
 trading_service = TradingAgentService(market_service, llm_service)
 news_service = NewsService()
+backtester = Backtester()
 
 # Scheduler for background tasks
 scheduler = AsyncIOScheduler()
@@ -519,6 +521,46 @@ def health_check():
         "llm_service": llm_service.health_check(),
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+# ── Backtesting ───────────────────────────────────────────────────────────
+
+class BacktestRequest(BaseModel):
+    strategy: str
+    coin: str
+    period_days: int = 90
+    leverage: int = 0          # 0 = use strategy default
+    initial_balance: float = 10000.0
+
+
+@app.post("/api/backtest")
+async def run_backtest(req: BacktestRequest):
+    """Run a backtest simulation. This may take several seconds."""
+    if req.strategy not in STRATEGIES:
+        raise HTTPException(status_code=400, detail=f"Unknown strategy: {req.strategy}")
+    if req.coin not in ["bitcoin", "ethereum", "binancecoin", "cardano",
+                        "solana", "ripple", "polkadot", "dogecoin"]:
+        raise HTTPException(status_code=400, detail=f"Unsupported coin: {req.coin}")
+    if req.period_days not in [7, 14, 30, 90, 180, 365]:
+        raise HTTPException(status_code=400, detail="Period must be 7, 14, 30, 90, 180, or 365 days")
+    if req.initial_balance < 50:
+        raise HTTPException(status_code=400, detail="Minimum balance is $50")
+
+    try:
+        result = await asyncio.to_thread(
+            backtester.run,
+            strategy_key=req.strategy,
+            coin=req.coin,
+            period_days=req.period_days,
+            leverage=req.leverage,
+            initial_balance=req.initial_balance,
+        )
+        return result.__dict__
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Backtest failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Backtest error: {str(e)}")
 
 
 @app.on_event("startup")

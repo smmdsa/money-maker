@@ -15,8 +15,77 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+            padding: 0;
+        }
+
+        /* ── Top Navigation Bar ────────────────────────────────── */
+        .top-nav {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 0 30px;
+            display: flex;
+            align-items: center;
+            height: 56px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            position: sticky;
+            top: 0;
+            z-index: 900;
+        }
+        .top-nav .nav-brand {
+            font-size: 1.3em;
+            font-weight: 700;
+            color: #fff;
+            margin-right: 40px;
+            white-space: nowrap;
+        }
+        .top-nav .nav-links {
+            display: flex;
+            gap: 4px;
+            height: 100%;
+        }
+        .top-nav .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 20px;
+            color: #aab;
+            font-size: 0.92em;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            height: 100%;
+        }
+        .top-nav .nav-link:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.05);
+        }
+        .top-nav .nav-link.active {
+            color: #fff;
+            border-bottom-color: #667eea;
+            background: rgba(102,126,234,0.1);
+        }
+
+        .app-body {
             padding: 20px;
         }
+
+        .app-section {
+            display: none;
+        }
+        .app-section.active {
+            display: block;
+        }
+
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        .form-group label { font-size: 0.85em; font-weight: 600; color: #555; }
+        .form-group select, .form-group input[type="number"] {
+            background: #fff; font-size: 0.95em;
+        }
+        #btMetricsGrid {
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
+        }
+        .portfolio-table th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; }
         
         .container {
             max-width: 1400px;
@@ -681,12 +750,24 @@
     </style>
 </head>
 <body>
+    <!-- ── Top Navigation ─────────────────────────────────────── -->
+    <nav class="top-nav">
+        <div class="nav-brand">💰 Money Maker</div>
+        <div class="nav-links">
+            <a class="nav-link active" onclick="switchSection('dashboard')" data-section="dashboard">
+                📊 Dashboard
+            </a>
+            <a class="nav-link" onclick="switchSection('backtest')" data-section="backtest">
+                🔙 Backtesting
+            </a>
+        </div>
+    </nav>
+
+    <div class="app-body">
+
+    <!-- ══════════════ SECTION: DASHBOARD ══════════════ -->
+    <div class="app-section active" id="section-dashboard">
     <div class="container">
-        <header>
-            <h1>💰 Money Maker - AI Trading Dashboard</h1>
-            <p class="subtitle">Real-time cryptocurrency trading simulation with intelligent agents</p>
-        </header>
-        
         <div class="dashboard">
             <!-- Agent Management -->
             <div class="card">
@@ -798,6 +879,115 @@
             </div>
         </div>
     </div>
+    </div><!-- /section-dashboard -->
+
+    <!-- ══════════════ SECTION: BACKTESTING ══════════════ -->
+    <div class="app-section" id="section-backtest">
+    <div class="container">
+
+        <!-- Backtest Config -->
+        <div class="card" style="margin-bottom:20px;">
+            <h2 style="margin-bottom:15px;">🔙 Backtesting Engine</h2>
+            <p style="color:#666;margin-bottom:18px;font-size:0.92em;">
+                Simulate a strategy against real historical futures data. See how it would have performed before risking capital.
+            </p>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;margin-bottom:16px;">
+                <!-- Strategy -->
+                <div class="form-group">
+                    <label>Strategy</label>
+                    <select id="btStrategy" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                        <option value="trend_rider">Trend Rider</option>
+                        <option value="mean_reversion">Mean Reversion</option>
+                        <option value="momentum_sniper">Momentum Sniper</option>
+                        <option value="scalper">Scalper Pro</option>
+                        <option value="grid_trader">Grid Trader</option>
+                        <option value="confluence_master" selected>Confluence Master</option>
+                    </select>
+                </div>
+                <!-- Coin -->
+                <div class="form-group">
+                    <label>Coin</label>
+                    <select id="btCoin" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                        <option value="bitcoin">Bitcoin (BTC)</option>
+                        <option value="ethereum">Ethereum (ETH)</option>
+                        <option value="solana">Solana (SOL)</option>
+                        <option value="binancecoin">BNB</option>
+                        <option value="ripple">XRP</option>
+                        <option value="cardano">Cardano (ADA)</option>
+                        <option value="polkadot">Polkadot (DOT)</option>
+                        <option value="dogecoin">Dogecoin (DOGE)</option>
+                    </select>
+                </div>
+                <!-- Period -->
+                <div class="form-group">
+                    <label>Period</label>
+                    <select id="btPeriod" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                        <option value="7">7 Days</option>
+                        <option value="14">14 Days</option>
+                        <option value="30">30 Days</option>
+                        <option value="90" selected>90 Days</option>
+                        <option value="180">180 Days</option>
+                        <option value="365">1 Year</option>
+                    </select>
+                </div>
+                <!-- Leverage -->
+                <div class="form-group">
+                    <label>Leverage <span id="btLevLabel" style="font-weight:700;">default</span></label>
+                    <input type="range" id="btLeverage" min="0" max="20" value="0" style="width:100%;"
+                           oninput="document.getElementById('btLevLabel').textContent = this.value == 0 ? 'default' : this.value + 'x'">
+                </div>
+                <!-- Balance -->
+                <div class="form-group">
+                    <label>Initial Balance</label>
+                    <input type="number" id="btBalance" value="10000" min="50" step="50"
+                           style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                </div>
+            </div>
+
+            <button class="btn" id="btRunBtn" onclick="runBacktest()" style="min-width:180px;">
+                ▶ Run Backtest
+            </button>
+            <span id="btStatus" style="margin-left:12px;font-size:0.88em;color:#999;"></span>
+        </div>
+
+        <!-- Backtest Results (hidden until run) -->
+        <div id="btResults" style="display:none;">
+            <!-- Metrics Cards -->
+            <div class="dashboard" style="margin-bottom:20px;" id="btMetricsGrid"></div>
+
+            <!-- Equity Curve Chart -->
+            <div class="card" style="margin-bottom:20px;">
+                <h2 style="margin-bottom:10px;">📈 Equity Curve vs Buy & Hold</h2>
+                <div id="btChartContainer" style="width:100%;height:350px;"></div>
+            </div>
+
+            <!-- Trades Table -->
+            <div class="card">
+                <h2 style="margin-bottom:10px;">📋 Simulated Trades (<span id="btTradeCount">0</span>)</h2>
+                <div style="max-height:400px;overflow-y:auto;">
+                    <table class="portfolio-table" id="btTradesTable">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Type</th>
+                                <th>Price</th>
+                                <th>Margin</th>
+                                <th>Size</th>
+                                <th>P/L</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="btTradesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    </div><!-- /section-backtest -->
+
+    </div><!-- /app-body -->
     
     <!-- Decision Detail Modal -->
     <div class="modal" id="decisionDetailModal">
@@ -1425,6 +1615,152 @@
         function resetNewsCountdown() {
             newsSecondsLeft = NEWS_REFRESH;
             updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft, NEWS_REFRESH);
+        }
+
+        // ══════════════ SECTION NAV ══════════════════════════════════════
+        function switchSection(sectionId) {
+            document.querySelectorAll('.app-section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            const sec = document.getElementById('section-' + sectionId);
+            if (sec) sec.classList.add('active');
+            event.currentTarget.classList.add('active');
+            window.scrollTo(0, 0);
+        }
+
+        // ══════════════ BACKTEST ═════════════════════════════════════════
+        let btChart = null;
+
+        async function runBacktest() {
+            const btn = document.getElementById('btRunBtn');
+            const status = document.getElementById('btStatus');
+            btn.disabled = true;
+            btn.textContent = '⏳ Running…';
+            status.textContent = 'Fetching historical data & simulating…';
+            document.getElementById('btResults').style.display = 'none';
+
+            const lev = parseInt(document.getElementById('btLeverage').value);
+            const body = {
+                strategy: document.getElementById('btStrategy').value,
+                coin: document.getElementById('btCoin').value,
+                period_days: parseInt(document.getElementById('btPeriod').value),
+                leverage: lev === 0 ? null : lev,
+                initial_balance: parseFloat(document.getElementById('btBalance').value)
+            };
+
+            try {
+                const res = await fetch('/api/backtest', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || res.statusText);
+                }
+                const data = await res.json();
+                renderBacktestResults(data);
+            } catch (e) {
+                status.textContent = '❌ ' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Run Backtest';
+            }
+        }
+
+        function renderBacktestResults(data) {
+            document.getElementById('btStatus').textContent =
+                `✅ Done — ${data.total_trades} trades over ${data.period_days}d`;
+            document.getElementById('btResults').style.display = 'block';
+
+            // ── Metric Cards ──
+            const grid = document.getElementById('btMetricsGrid');
+            const m = [
+                { label: 'Total Return', value: (data.total_return_pct >= 0 ? '+' : '') + data.total_return_pct.toFixed(2) + '%',
+                  color: data.total_return_pct >= 0 ? '#4caf50' : '#f44336' },
+                { label: 'Buy & Hold', value: (data.buy_hold_return_pct >= 0 ? '+' : '') + data.buy_hold_return_pct.toFixed(2) + '%',
+                  color: data.buy_hold_return_pct >= 0 ? '#4caf50' : '#f44336' },
+                { label: 'Max Drawdown', value: data.max_drawdown_pct.toFixed(2) + '%', color: '#f44336' },
+                { label: 'Sharpe Ratio', value: data.sharpe_ratio.toFixed(2),
+                  color: data.sharpe_ratio >= 1 ? '#4caf50' : data.sharpe_ratio >= 0 ? '#ff9800' : '#f44336' },
+                { label: 'Win Rate', value: data.win_rate.toFixed(1) + '%',
+                  color: data.win_rate >= 50 ? '#4caf50' : '#ff9800' },
+                { label: 'Profit Factor', value: data.profit_factor.toFixed(2),
+                  color: data.profit_factor >= 1 ? '#4caf50' : '#f44336' },
+                { label: 'Trades', value: data.total_trades, color: '#2196f3' },
+                { label: 'Final Balance', value: '$' + data.final_balance.toLocaleString('en-US', {maximumFractionDigits: 2}),
+                  color: data.final_balance >= data.initial_balance ? '#4caf50' : '#f44336' },
+            ];
+            grid.innerHTML = m.map(i => `
+                <div class="card" style="text-align:center;padding:14px 10px;">
+                    <div style="font-size:0.82em;color:#777;margin-bottom:4px;">${i.label}</div>
+                    <div style="font-size:1.4em;font-weight:700;color:${i.color};">${i.value}</div>
+                </div>
+            `).join('');
+
+            // ── Equity Curve ──
+            renderEquityCurve(data.equity_curve);
+
+            // ── Trades Table ──
+            document.getElementById('btTradeCount').textContent = data.trades.length;
+            const tbody = document.getElementById('btTradesBody');
+            tbody.innerHTML = data.trades.map(t => {
+                const pl = t.pnl != null ? (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2) : '—';
+                const plColor = t.pnl == null ? '#999' : (t.pnl >= 0 ? '#4caf50' : '#f44336');
+                const d = new Date(t.timestamp * 1000);
+                const badge = t.side === 'LONG'
+                    ? '<span style="color:#4caf50;font-weight:700;">LONG</span>'
+                    : '<span style="color:#f44336;font-weight:700;">SHORT</span>';
+                return `<tr>
+                    <td>${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</td>
+                    <td>${badge} ${t.action}</td>
+                    <td>$${fmtPrice(t.price)}</td>
+                    <td>$${t.margin ? t.margin.toFixed(2) : '—'}</td>
+                    <td>${t.size ? t.size.toFixed(6) : '—'}</td>
+                    <td style="color:${plColor};font-weight:600;">${pl}</td>
+                    <td style="font-size:0.85em;color:#888;">${t.reason || ''}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderEquityCurve(curve) {
+            const container = document.getElementById('btChartContainer');
+            container.innerHTML = '';
+            if (!curve || curve.length === 0) {
+                container.innerHTML = '<p style="text-align:center;color:#999;">No equity data</p>';
+                return;
+            }
+
+            if (btChart) { btChart.remove(); btChart = null; }
+
+            btChart = LightweightCharts.createChart(container, {
+                width: container.clientWidth,
+                height: 350,
+                layout: { background: { type: 'solid', color: '#ffffff' }, textColor: '#333' },
+                grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
+                rightPriceScale: { borderColor: '#ddd' },
+                timeScale: { borderColor: '#ddd', timeVisible: true },
+                crosshair: { mode: 0 },
+            });
+
+            const equitySeries = btChart.addLineSeries({
+                color: '#2196f3', lineWidth: 2, title: 'Strategy'
+            });
+            const bhSeries = btChart.addLineSeries({
+                color: '#ff9800', lineWidth: 1, lineStyle: 2, title: 'Buy & Hold'
+            });
+
+            const equityData = curve.map(p => ({ time: p.time, value: p.equity }));
+            const bhData = curve.filter(p => p.buy_hold != null).map(p => ({ time: p.time, value: p.buy_hold }));
+
+            equitySeries.setData(equityData);
+            if (bhData.length) bhSeries.setData(bhData);
+            btChart.timeScale().fitContent();
+
+            // Responsive resize
+            const ro = new ResizeObserver(() => {
+                btChart.applyOptions({ width: container.clientWidth });
+            });
+            ro.observe(container);
         }
 
         // ── Refresh cycle ─────────────────────────────────────────────────
