@@ -273,8 +273,32 @@ def get_agent_trades(agent_id: int, limit: int = 50, db: Session = Depends(get_d
         "profit_loss": t.profit_loss,
         "leverage": t.leverage,
         "margin": t.margin,
+        "decision_id": t.decision_id,
         "timestamp": t.timestamp.isoformat()
     } for t in trades]
+
+
+@app.get("/api/decisions/{decision_id}")
+def get_decision_detail(decision_id: int, db: Session = Depends(get_db)):
+    """Get a single decision by ID (for trade → decision modal)"""
+    d = db.query(Decision).filter(Decision.id == decision_id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    return {
+        "id": d.id,
+        "agent_id": d.agent_id,
+        "cryptocurrency": d.cryptocurrency,
+        "decision_type": d.decision_type,
+        "reasoning": d.reasoning,
+        "llm_reasoning": d.llm_reasoning,
+        "llm_sentiment_adj": d.llm_sentiment_adj,
+        "action_taken": d.action_taken,
+        "confidence": d.confidence,
+        "indicators": d.indicators,
+        "news_considered": d.news_considered,
+        "strategy": d.strategy,
+        "timestamp": d.timestamp.isoformat()
+    }
 
 
 @app.get("/api/agents/{agent_id}/decisions")

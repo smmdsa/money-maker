@@ -379,6 +379,106 @@
         .llm-adj.negative { background: rgba(255,82,82,0.2); color: #ff5252; }
         .llm-adj.neutral  { background: rgba(150,150,150,0.2); color: #aaa; }
 
+        /* Trade item clickable */
+        .log-item.clickable {
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .log-item.clickable:hover {
+            border-left-color: #00d2ff;
+            background: #eef1ff;
+        }
+        .log-item.clickable .click-hint {
+            font-size: 0.75em;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        /* Decision Detail Modal */
+        .decision-modal-content {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 650px;
+            width: 92%;
+            max-height: 85vh;
+            overflow-y: auto;
+            position: relative;
+            border: 1px solid #2a2a4a;
+        }
+        .decision-modal-content .close-btn {
+            color: #aaa;
+            position: absolute;
+            top: 12px;
+            right: 18px;
+            font-size: 1.6em;
+            z-index: 10;
+        }
+        .decision-modal-content .close-btn:hover { color: #fff; }
+        .dm-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+        }
+        .dm-header h3 {
+            margin: 0;
+            color: #fff;
+            font-size: 1.3em;
+        }
+        .dm-section {
+            margin-bottom: 16px;
+        }
+        .dm-section-title {
+            font-size: 0.78em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #667eea;
+            margin-bottom: 6px;
+        }
+        .dm-section-body {
+            padding: 10px 14px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 6px;
+            font-size: 0.92em;
+            line-height: 1.6;
+        }
+        .dm-indicators {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 8px;
+        }
+        .dm-indicator {
+            padding: 6px 10px;
+            background: rgba(102,126,234,0.12);
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+        .dm-indicator .ind-label {
+            color: #999;
+            font-size: 0.82em;
+        }
+        .dm-indicator .ind-value {
+            color: #fff;
+            font-weight: 600;
+        }
+        .dm-news-item {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            font-size: 0.9em;
+        }
+        .dm-llm-block {
+            padding: 12px 14px;
+            background: linear-gradient(135deg, #0d1b2a 0%, #1b2838 100%);
+            border-left: 3px solid #00d2ff;
+            border-radius: 6px;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
         /* News links */
         .news-link {
             color: #333;
@@ -688,6 +788,14 @@
         </div>
     </div>
     
+    <!-- Decision Detail Modal -->
+    <div class="modal" id="decisionDetailModal">
+        <div class="decision-modal-content">
+            <span class="close-btn" onclick="hideDecisionModal()">&times;</span>
+            <div id="decisionDetailBody">Loading...</div>
+        </div>
+    </div>
+
     <!-- Create Agent Modal -->
     <div class="modal" id="createAgentModal">
         <div class="modal-content" style="max-width: 600px;">
@@ -900,8 +1008,9 @@
                     const isLong = trade.trade_type.includes('long');
                     const typeLabel = trade.trade_type.replace(/_/g, ' ').toUpperCase();
                     const typeBadge = isLong ? 'badge-long' : 'badge-short';
+                    const hasDecision = trade.decision_id != null;
                     return `
-                    <div class="log-item">
+                    <div class="log-item ${hasDecision ? 'clickable' : ''}" ${hasDecision ? `onclick="showDecisionModal(${trade.decision_id})"` : ''}>
                         <div class="log-time">${new Date(trade.timestamp).toLocaleString()}</div>
                         <div class="log-content">
                             <span class="${typeBadge}">${typeLabel}</span>
@@ -912,6 +1021,7 @@
                             ${trade.profit_loss !== 0 ? `<br><span class="${trade.profit_loss >= 0 ? 'profit' : 'loss'}">
                                 P/L: ${trade.profit_loss >= 0 ? '+' : ''}$${trade.profit_loss.toFixed(2)}
                             </span>` : ''}
+                            ${hasDecision ? '<div class="click-hint">🔍 Click to see AI decision</div>' : ''}
                         </div>
                     </div>
                 `}).join('');
@@ -1134,6 +1244,99 @@
             document.getElementById('createAgentModal').classList.add('active');
             loadStrategies();
         }
+
+        // Decision Detail Modal
+        async function showDecisionModal(decisionId) {
+            const modal = document.getElementById('decisionDetailModal');
+            const body = document.getElementById('decisionDetailBody');
+            modal.classList.add('active');
+            body.innerHTML = '<div style="text-align:center;padding:30px;color:#999;">Loading decision...</div>';
+
+            try {
+                const resp = await fetch(`/api/decisions/${decisionId}`);
+                if (!resp.ok) throw new Error('Decision not found');
+                const d = await resp.json();
+
+                const actionClass = d.action_taken.includes('long') ? 'badge-long'
+                    : d.action_taken.includes('short') ? 'badge-short' : '';
+
+                // Indicators grid
+                let indicatorsHtml = '';
+                if (d.indicators && Object.keys(d.indicators).length > 0) {
+                    const items = Object.entries(d.indicators).map(([key, val]) => {
+                        if (typeof val === 'object' && val !== null) {
+                            return Object.entries(val).map(([sk, sv]) =>
+                                `<div class="dm-indicator"><span class="ind-label">${key}.${sk}</span><br><span class="ind-value">${typeof sv === 'number' ? sv.toFixed(4) : sv}</span></div>`
+                            ).join('');
+                        }
+                        return `<div class="dm-indicator"><span class="ind-label">${key}</span><br><span class="ind-value">${typeof val === 'number' ? val.toFixed(4) : val}</span></div>`;
+                    }).join('');
+                    indicatorsHtml = `
+                        <div class="dm-section">
+                            <div class="dm-section-title">📊 Technical Indicators</div>
+                            <div class="dm-indicators">${items}</div>
+                        </div>`;
+                }
+
+                // News considered
+                let newsHtml = '';
+                if (d.news_considered && d.news_considered.length > 0) {
+                    const newsItems = d.news_considered.map(n =>
+                        `<div class="dm-news-item"><span class="${n.sentiment === 'positive' ? 'profit' : n.sentiment === 'negative' ? 'loss' : ''}">[${n.sentiment}]</span> ${n.title}</div>`
+                    ).join('');
+                    newsHtml = `
+                        <div class="dm-section">
+                            <div class="dm-section-title">📰 News Considered</div>
+                            <div class="dm-section-body">${newsItems}</div>
+                        </div>`;
+                }
+
+                // LLM Analysis
+                let llmHtml = '';
+                if (d.llm_reasoning) {
+                    const adj = d.llm_sentiment_adj || 0;
+                    const adjClass = adj > 0 ? 'positive' : adj < 0 ? 'negative' : 'neutral';
+                    const adjLabel = adj > 0 ? `+${(adj*100).toFixed(0)}%` : adj < 0 ? `${(adj*100).toFixed(0)}%` : '0%';
+                    llmHtml = `
+                        <div class="dm-section">
+                            <div class="dm-section-title">🧠 Gemini AI Analysis <span class="llm-adj ${adjClass}">${adjLabel} conf.</span></div>
+                            <div class="dm-llm-block">${d.llm_reasoning}</div>
+                        </div>`;
+                }
+
+                body.innerHTML = `
+                    <div class="dm-header">
+                        <h3>${d.cryptocurrency.toUpperCase()}</h3>
+                        <span class="${actionClass}" style="font-size:1em;">${d.action_taken.replace(/_/g, ' ').toUpperCase()}</span>
+                        ${d.strategy ? `<span class="badge-strategy">${d.strategy.replace(/_/g, ' ')}</span>` : ''}
+                    </div>
+                    <div style="font-size:0.85em;color:#888;margin-bottom:14px;">${new Date(d.timestamp).toLocaleString()}</div>
+
+                    <div class="dm-section">
+                        <div class="dm-section-title">📋 Strategy Reasoning</div>
+                        <div class="dm-section-body">
+                            Confidence: <strong>${(d.confidence * 100).toFixed(0)}%</strong><br>
+                            ${d.reasoning}
+                        </div>
+                    </div>
+
+                    ${indicatorsHtml}
+                    ${newsHtml}
+                    ${llmHtml}
+                `;
+            } catch (err) {
+                body.innerHTML = `<div style="text-align:center;padding:30px;color:#ff5252;">Error loading decision: ${err.message}</div>`;
+            }
+        }
+
+        function hideDecisionModal() {
+            document.getElementById('decisionDetailModal').classList.remove('active');
+        }
+
+        // Close decision modal on backdrop click
+        document.getElementById('decisionDetailModal')?.addEventListener('click', function(e) {
+            if (e.target === this) hideDecisionModal();
+        });
 
         // Load strategies for the create agent modal
         async function loadStrategies() {

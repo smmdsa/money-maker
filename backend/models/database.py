@@ -59,6 +59,7 @@ class Trade(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     agent_id = Column(Integer, ForeignKey("trading_agents.id"))
+    decision_id = Column(Integer, ForeignKey("decisions.id"), nullable=True)
     cryptocurrency = Column(String)
     symbol = Column(String)
     trade_type = Column(String)      # open_long, close_long, open_short, close_short
@@ -71,6 +72,7 @@ class Trade(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     agent = relationship("TradingAgent", back_populates="trades")
+    decision = relationship("Decision", backref="trade")
 
 
 class Decision(Base):

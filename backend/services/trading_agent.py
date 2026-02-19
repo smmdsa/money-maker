@@ -94,6 +94,7 @@ class TradingAgentService:
                 "reasoning": reasoning,
                 "confidence": best_signal.confidence if best_signal else 0.0,
             }, {}, [], strategy_key)
+            db.commit()
 
             return {
                 "action": "hold",
@@ -433,7 +434,7 @@ class TradingAgentService:
                 f"{effective_confidence:.2f} ({llm_analysis.sentiment_adjustment:+.2f})"
             )
 
-        self._log_decision(db, agent.id, coin, {
+        decision_id = self._log_decision(db, agent.id, coin, {
             "action": direction,
             "reasoning": signal.reasoning,
             "confidence": effective_confidence,
@@ -442,6 +443,7 @@ class TradingAgentService:
             llm_sentiment_adj=llm_analysis.sentiment_adjustment if llm_analysis else 0.0,
         )
 
+        trade.decision_id = decision_id
         db.commit()
 
         tag = "LONG" if direction == "long" else "SHORT"
@@ -498,12 +500,13 @@ class TradingAgentService:
         )
         db.add(trade)
 
-        self._log_decision(db, agent.id, pos.cryptocurrency, {
+        decision_id = self._log_decision(db, agent.id, pos.cryptocurrency, {
             "action": trade_type,
             "reasoning": reason,
             "confidence": 0.9,
         }, {}, [], strategy_key)
 
+        trade.decision_id = decision_id
         db.delete(pos)
         db.commit()
 
@@ -561,4 +564,5 @@ class TradingAgentService:
             strategy=strategy_key,
         )
         db.add(log)
-        db.commit()
+        db.flush()  # get the ID before commit
+        return log.id
