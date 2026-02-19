@@ -868,6 +868,151 @@
             color: #999;
             margin-top: 4px;
         }
+
+        /* ── Market Clocks Section ─────────────────────────────── */
+        .market-clocks-bar {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 12px 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+            overflow-x: auto;
+        }
+        .market-clocks-bar h3 {
+            color: #aab;
+            font-size: 0.78em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        .market-clocks-grid {
+            display: flex;
+            gap: 10px;
+            min-width: max-content;
+        }
+        .market-clock-card {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 10px 14px;
+            min-width: 145px;
+            text-align: center;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .market-clock-card:hover {
+            background: rgba(255,255,255,0.1);
+            transform: translateY(-1px);
+        }
+        .market-clock-card.market-open {
+            border-color: rgba(76,175,80,0.4);
+            box-shadow: 0 0 8px rgba(76,175,80,0.15);
+        }
+        .market-clock-card.market-closed {
+            border-color: rgba(255,82,82,0.2);
+            opacity: 0.7;
+        }
+        .market-clock-card.market-premarket {
+            border-color: rgba(255,152,0,0.4);
+            box-shadow: 0 0 8px rgba(255,152,0,0.1);
+        }
+        .mc-flag {
+            font-size: 1.3em;
+            margin-bottom: 2px;
+        }
+        .mc-name {
+            font-size: 0.78em;
+            font-weight: 600;
+            color: #ccd;
+            margin-bottom: 4px;
+        }
+        .mc-time {
+            font-size: 1.05em;
+            font-weight: 700;
+            color: #fff;
+            font-variant-numeric: tabular-nums;
+            margin-bottom: 4px;
+        }
+        .mc-status {
+            font-size: 0.7em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-bottom: 4px;
+        }
+        .mc-status.open {
+            background: rgba(76,175,80,0.2);
+            color: #69f0ae;
+        }
+        .mc-status.closed {
+            background: rgba(255,82,82,0.15);
+            color: #ff8a80;
+        }
+        .mc-status.premarket {
+            background: rgba(255,152,0,0.2);
+            color: #ffcc80;
+        }
+        .mc-countdown {
+            font-size: 0.72em;
+            color: #889;
+            font-variant-numeric: tabular-nums;
+        }
+        .mc-session-bar {
+            width: 100%;
+            height: 3px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+        .mc-session-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 1s linear;
+        }
+        .mc-local-time {
+            background: rgba(102,126,234,0.15);
+            border: 1px solid rgba(102,126,234,0.3);
+            border-radius: 8px;
+            padding: 10px 14px;
+            min-width: 145px;
+            text-align: center;
+        }
+        .mc-local-time .mc-name {
+            color: #667eea;
+        }
+        .mc-local-time .mc-time {
+            font-size: 1.15em;
+            color: #c8d0ff;
+        }
+        /* Alert toast */
+        .market-alert-toast {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            padding: 14px 20px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            z-index: 2000;
+            animation: slideInRight 0.4s ease-out;
+            max-width: 340px;
+        }
+        .market-alert-toast.alert-open {
+            border-left-color: #4caf50;
+        }
+        .market-alert-toast.alert-close {
+            border-left-color: #ff5252;
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(120%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -889,6 +1034,15 @@
     <!-- ══════════════ SECTION: DASHBOARD ══════════════ -->
     <div class="app-section active" id="section-dashboard">
     <div class="container">
+
+        <!-- ── Market Clocks ───────────────────────────────────── -->
+        <div class="market-clocks-bar" id="marketClocksBar">
+            <h3>🕐 World Markets</h3>
+            <div class="market-clocks-grid" id="marketClocksGrid">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
         <div class="dashboard">
             <!-- Agent Management -->
             <div class="card">
@@ -1998,6 +2152,232 @@
             window.scrollTo(0, 0);
         }
 
+        // ══════════════ MARKET CLOCKS ENGINE ═════════════════════════════
+        const MARKETS = [
+            { id: 'nyse',     name: 'NYSE',      flag: '🇺🇸', tz: 'America/New_York',    open: [9,30],  close: [16,0],  preOpen: [4,0],   color: '#4caf50' },
+            { id: 'nasdaq',   name: 'NASDAQ',     flag: '🇺🇸', tz: 'America/New_York',    open: [9,30],  close: [16,0],  preOpen: [4,0],   color: '#00bcd4' },
+            { id: 'lse',      name: 'London',     flag: '🇬🇧', tz: 'Europe/London',       open: [8,0],   close: [16,30], preOpen: [7,0],   color: '#2196f3' },
+            { id: 'xetra',    name: 'Frankfurt',  flag: '🇩🇪', tz: 'Europe/Berlin',       open: [9,0],   close: [17,30], preOpen: [8,0],   color: '#ff9800' },
+            { id: 'tse',      name: 'Tokyo',      flag: '🇯🇵', tz: 'Asia/Tokyo',          open: [9,0],   close: [15,0],  preOpen: [8,0],   color: '#e91e63' },
+            { id: 'sse',      name: 'Shanghai',   flag: '🇨🇳', tz: 'Asia/Shanghai',       open: [9,30],  close: [15,0],  preOpen: [9,15],  color: '#f44336' },
+            { id: 'hkex',     name: 'Hong Kong',  flag: '🇭🇰', tz: 'Asia/Hong_Kong',      open: [9,30],  close: [16,0],  preOpen: [9,0],   color: '#9c27b0' },
+            { id: 'asx',      name: 'Sydney',     flag: '🇦🇺', tz: 'Australia/Sydney',    open: [10,0],  close: [16,0],  preOpen: [7,0],   color: '#009688' },
+        ];
+
+        // Track alert state so we don't fire duplicates
+        const marketAlertFired = {};
+        let notificationsGranted = false;
+
+        function requestNotificationPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission().then(perm => {
+                    notificationsGranted = (perm === 'granted');
+                });
+            } else if ('Notification' in window) {
+                notificationsGranted = (Notification.permission === 'granted');
+            }
+        }
+
+        function getMarketLocalTime(tz) {
+            const now = new Date();
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: tz,
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+                hour12: false,
+                weekday: 'short',
+                year: 'numeric', month: '2-digit', day: '2-digit'
+            }).formatToParts(now);
+            const get = type => (parts.find(p => p.type === type) || {}).value || '';
+            return {
+                h: parseInt(get('hour')),
+                m: parseInt(get('minute')),
+                s: parseInt(get('second')),
+                weekday: get('weekday'),
+                timeStr: `${get('hour')}:${get('minute')}:${get('second')}`,
+                dateStr: `${get('weekday')} ${get('day')}/${get('month')}`
+            };
+        }
+
+        function getMarketStatus(market) {
+            const t = getMarketLocalTime(market.tz);
+            const nowMin = t.h * 60 + t.m;
+            const openMin = market.open[0] * 60 + market.open[1];
+            const closeMin = market.close[0] * 60 + market.close[1];
+            const preOpenMin = market.preOpen[0] * 60 + market.preOpen[1];
+            const isWeekend = (t.weekday === 'Sat' || t.weekday === 'Sun');
+
+            let status, countdown, sessionPct;
+
+            if (isWeekend) {
+                status = 'closed';
+                // Time until Monday open
+                const daysToMon = t.weekday === 'Sat' ? 2 : 1;
+                const minsLeft = daysToMon * 24 * 60 + (openMin - nowMin);
+                countdown = `Opens Mon ${formatCountdown(minsLeft > 0 ? minsLeft : minsLeft + 7 * 24 * 60)}`;
+                sessionPct = 0;
+            } else if (nowMin >= openMin && nowMin < closeMin) {
+                status = 'open';
+                const minsLeft = closeMin - nowMin;
+                countdown = `Closes in ${formatCountdown(minsLeft)}`;
+                const totalSession = closeMin - openMin;
+                sessionPct = ((nowMin - openMin) / totalSession) * 100;
+            } else if (nowMin >= preOpenMin && nowMin < openMin) {
+                status = 'premarket';
+                const minsLeft = openMin - nowMin;
+                countdown = `Opens in ${formatCountdown(minsLeft)}`;
+                sessionPct = 0;
+            } else {
+                status = 'closed';
+                let minsLeft;
+                if (nowMin >= closeMin) {
+                    // After close, next open is tomorrow (or Monday if Friday)
+                    const isFriday = t.weekday === 'Fri';
+                    const daysAhead = isFriday ? 3 : 1;
+                    minsLeft = (daysAhead * 24 * 60) - nowMin + openMin;
+                } else {
+                    // Before pre-market
+                    minsLeft = preOpenMin - nowMin;
+                    if (minsLeft <= 60) {
+                        countdown = `Pre-market in ${formatCountdown(minsLeft)}`;
+                    }
+                }
+                if (!countdown) countdown = `Opens in ${formatCountdown(minsLeft)}`;
+                sessionPct = 0;
+            }
+
+            return { ...t, status, countdown, sessionPct, market };
+        }
+
+        function formatCountdown(totalMins) {
+            if (totalMins < 0) totalMins = 0;
+            const h = Math.floor(totalMins / 60);
+            const m = Math.round(totalMins % 60);
+            if (h >= 24) {
+                const d = Math.floor(h / 24);
+                const rh = h % 24;
+                return `${d}d ${rh}h`;
+            }
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
+        function renderMarketClocks() {
+            const grid = document.getElementById('marketClocksGrid');
+            if (!grid) return;
+
+            // Local time card
+            const localNow = new Date();
+            const localTime = localNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+            const localDate = localNow.toLocaleDateString([], { weekday: 'short', day: '2-digit', month: 'short' });
+            const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').pop().replace(/_/g, ' ');
+
+            let html = `
+                <div class="mc-local-time">
+                    <div class="mc-flag">📍</div>
+                    <div class="mc-name">${tzName}</div>
+                    <div class="mc-time">${localTime}</div>
+                    <div class="mc-countdown" style="color:#8890ff;">${localDate}</div>
+                </div>
+            `;
+
+            for (const market of MARKETS) {
+                const s = getMarketStatus(market);
+                const statusClass = s.status === 'open' ? 'market-open'
+                    : s.status === 'premarket' ? 'market-premarket' : 'market-closed';
+                const statusLabel = s.status === 'open' ? 'OPEN'
+                    : s.status === 'premarket' ? 'PRE-MKT' : 'CLOSED';
+                const fillColor = s.status === 'open' ? market.color
+                    : s.status === 'premarket' ? '#ff9800' : 'rgba(255,255,255,0.1)';
+
+                html += `
+                    <div class="market-clock-card ${statusClass}" data-market="${market.id}">
+                        <div class="mc-flag">${market.flag}</div>
+                        <div class="mc-name">${market.name}</div>
+                        <div class="mc-time">${s.timeStr}</div>
+                        <div class="mc-status ${s.status}">${statusLabel}</div>
+                        <div class="mc-countdown">${s.countdown}</div>
+                        <div class="mc-session-bar">
+                            <div class="mc-session-fill" style="width:${s.sessionPct}%;background:${fillColor};"></div>
+                        </div>
+                    </div>
+                `;
+
+                // Check for alerts (market just opened or closed)
+                checkMarketAlert(market, s);
+            }
+
+            grid.innerHTML = html;
+        }
+
+        function checkMarketAlert(market, status) {
+            const alertKey = `${market.id}_${status.status}`;
+            const prevKey = marketAlertFired[market.id];
+
+            if (prevKey === alertKey) return; // Already alerted
+
+            // Only alert on transitions
+            if (prevKey && status.status === 'open' && !prevKey.endsWith('_open')) {
+                fireMarketAlert(market, 'open');
+            } else if (prevKey && status.status === 'closed' && prevKey.endsWith('_open')) {
+                fireMarketAlert(market, 'close');
+            }
+
+            marketAlertFired[market.id] = alertKey;
+        }
+
+        function fireMarketAlert(market, type) {
+            const isOpen = type === 'open';
+            const title = `${market.flag} ${market.name} ${isOpen ? 'OPENED' : 'CLOSED'}`;
+            const body = isOpen
+                ? `${market.name} market just opened. Expect increased volatility and volume.`
+                : `${market.name} market just closed. Liquidity may decrease.`;
+
+            // Browser notification
+            if (notificationsGranted) {
+                try {
+                    new Notification(title, { body, icon: '💰' });
+                } catch (e) { /* mobile fallback */ }
+            }
+
+            // In-app toast
+            showMarketToast(title, body, type);
+
+            // Broadcast to trading agents via the WebSocket context
+            console.log(`🔔 Market Alert: ${title}`);
+        }
+
+        function showMarketToast(title, body, type) {
+            const toast = document.createElement('div');
+            toast.className = `market-alert-toast alert-${type}`;
+            toast.innerHTML = `
+                <div style="font-weight:700;font-size:0.95em;margin-bottom:4px;">${title}</div>
+                <div style="font-size:0.85em;color:#aab;">${body}</div>
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.transition = 'opacity 0.5s, transform 0.5s';
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(120%)';
+                setTimeout(() => toast.remove(), 600);
+            }, 6000);
+        }
+
+        // Get market hours data for API/agent context
+        function getMarketHoursContext() {
+            const result = [];
+            for (const market of MARKETS) {
+                const s = getMarketStatus(market);
+                result.push({
+                    name: market.name,
+                    status: s.status,
+                    local_time: s.timeStr,
+                    countdown: s.countdown,
+                    session_pct: Math.round(s.sessionPct)
+                });
+            }
+            return result;
+        }
+
         // ══════════════ BACKTEST ═════════════════════════════════════════
         let btChart = null;
 
@@ -2182,6 +2562,11 @@
             refreshNews();
             initWebSocket();
             startCountdownTick();
+
+            // Market clocks
+            requestNotificationPermission();
+            renderMarketClocks();
+            setInterval(renderMarketClocks, 1000); // Update every second
 
             // Initialize charts (pass string IDs, not DOM elements)
             if (typeof Charts !== 'undefined') {

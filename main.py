@@ -9,6 +9,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import logging
 import asyncio
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from backend.database import get_db, init_db
@@ -417,6 +418,12 @@ def get_strategies():
     }
 
 
+@app.get("/api/market/hours")
+def market_hours():
+    """Get current status of major world stock markets"""
+    return get_market_hours_context()
+
+
 @app.get("/api/market/{coin}")
 def get_coin_data(coin: str):
     """Get detailed data for a specific coin"""
@@ -600,6 +607,57 @@ def health_check():
         "llm_service": llm_service.health_check(),
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+# ── Market Hours ──────────────────────────────────────────────────────────
+
+WORLD_MARKETS = [
+    {"id": "nyse",   "name": "NYSE",      "tz": "America/New_York",  "open": (9,30),  "close": (16,0),  "pre": (4,0)},
+    {"id": "nasdaq", "name": "NASDAQ",    "tz": "America/New_York",  "open": (9,30),  "close": (16,0),  "pre": (4,0)},
+    {"id": "lse",    "name": "London",    "tz": "Europe/London",     "open": (8,0),   "close": (16,30), "pre": (7,0)},
+    {"id": "xetra",  "name": "Frankfurt", "tz": "Europe/Berlin",     "open": (9,0),   "close": (17,30), "pre": (8,0)},
+    {"id": "tse",    "name": "Tokyo",     "tz": "Asia/Tokyo",        "open": (9,0),   "close": (15,0),  "pre": (8,0)},
+    {"id": "sse",    "name": "Shanghai",  "tz": "Asia/Shanghai",     "open": (9,30),  "close": (15,0),  "pre": (9,15)},
+    {"id": "hkex",   "name": "Hong Kong", "tz": "Asia/Hong_Kong",    "open": (9,30),  "close": (16,0),  "pre": (9,0)},
+    {"id": "asx",    "name": "Sydney",    "tz": "Australia/Sydney",  "open": (10,0),  "close": (16,0),  "pre": (7,0)},
+]
+
+
+def get_market_hours_context() -> list:
+    """Return current status of all major markets. Used by trading agent for context."""
+    results = []
+    for mkt in WORLD_MARKETS:
+        tz = ZoneInfo(mkt["tz"])
+        now = datetime.now(tz)
+        weekday = now.weekday()  # 0=Mon, 5=Sat, 6=Sun
+        now_min = now.hour * 60 + now.minute
+        open_min = mkt["open"][0] * 60 + mkt["open"][1]
+        close_min = mkt["close"][0] * 60 + mkt["close"][1]
+        pre_min = mkt["pre"][0] * 60 + mkt["pre"][1]
+
+        is_weekend = weekday >= 5
+
+        if is_weekend:
+            status = "closed"
+            session_pct = 0
+        elif open_min <= now_min < close_min:
+            status = "open"
+            session_pct = round((now_min - open_min) / (close_min - open_min) * 100)
+        elif pre_min <= now_min < open_min:
+            status = "pre-market"
+            session_pct = 0
+        else:
+            status = "closed"
+            session_pct = 0
+
+        results.append({
+            "id": mkt["id"],
+            "name": mkt["name"],
+            "status": status,
+            "local_time": now.strftime("%H:%M"),
+            "session_pct": session_pct,
+        })
+    return results
 
 
 # ── Backtesting ───────────────────────────────────────────────────────────

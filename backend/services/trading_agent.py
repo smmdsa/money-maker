@@ -9,6 +9,7 @@ import logging
 from typing import Dict, List, Optional
 import random
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from backend.models.database import TradingAgent, Portfolio, Trade, Decision, NewsEvent
@@ -69,16 +70,21 @@ class TradingAgentService:
                     "strategy": strategy_key,
                 }
 
+            # Step 2.5: Get market hours context
+            market_ctx = self._get_market_context()
+
             # Step 3: Scan coins and pick the best signal
             best_signal, best_coin = self._scan_for_best_signal(
-                agent, strategy_key, existing_positions, db
+                agent, strategy_key, existing_positions, db,
+                market_ctx=market_ctx,
             )
 
             if best_signal and best_coin and best_signal.direction in ("long", "short"):
                 if best_signal.confidence >= strategy_cfg.min_confidence:
                     # Enrich with LLM analysis before opening
                     llm_analysis = self._get_llm_analysis(
-                        best_coin, best_signal, strategy_key, db
+                        best_coin, best_signal, strategy_key, db,
+                        market_ctx=market_ctx,
                     )
                     decision = self._open_position(
                         agent, best_coin, best_signal, strategy_key, db,
@@ -181,7 +187,8 @@ class TradingAgentService:
 
     def _scan_for_best_signal(
         self, agent: TradingAgent, strategy_key: str,
-        existing_positions: List[Portfolio], db: Session
+        existing_positions: List[Portfolio], db: Session,
+        market_ctx: Dict = None,
     ) -> tuple:
         """Scan all coins and return the best signal + coin."""
         existing_coins = {p.cryptocurrency for p in existing_positions}
@@ -225,6 +232,10 @@ class TradingAgentService:
             sentiment = self._get_news_sentiment(coin, db)
             if sentiment != 0:
                 self._adjust_signal_for_sentiment(signal, sentiment)
+
+            # Factor in market hours
+            if market_ctx:
+                self._adjust_signal_for_market_hours(signal, market_ctx)
 
             if signal.direction in ("long", "short"):
                 if best_signal is None or signal.confidence > best_signal.confidence:
@@ -276,7 +287,8 @@ class TradingAgentService:
     # ── LLM Analysis ────────────────────────────────────────────────────
 
     def _get_llm_analysis(self, coin: str, signal: Signal,
-                          strategy_key: str, db: Session):
+                          strategy_key: str, db: Session,
+                          market_ctx: Dict = None):
         """Get LLM-enriched analysis for a trade signal. Returns None if unavailable."""
         if not self.llm_service or not self.llm_service.is_available:
             return None
@@ -297,6 +309,14 @@ class TradingAgentService:
 
             # Gather indicators
             indicators = self._compute_indicators(coin) or {}
+
+            # Add market hours context to indicators for LLM
+            if market_ctx:
+                indicators["market_session"] = market_ctx["session"]
+                indicators["open_markets"] = ", ".join(market_ctx["open_markets"]) if market_ctx["open_markets"] else "None"
+                indicators["volatility_hint"] = market_ctx["volatility_hint"]
+                if market_ctx["opening_soon"]:
+                    indicators["markets_opening_soon"] = ", ".join(market_ctx["opening_soon"])
 
             strategy_cfg = STRATEGIES.get(strategy_key)
             strategy_name = strategy_cfg.name if strategy_cfg else strategy_key
@@ -342,6 +362,93 @@ class TradingAgentService:
         elif signal.direction == "short" and sentiment > 0.1:
             signal.confidence = max(signal.confidence - 0.05, 0.0)
             signal.reasoning += f"; ⚠ Positive news conflicts (+{sentiment:.2f})"
+
+    # ── Market Hours Awareness ────────────────────────────────────────────
+
+    WORLD_MARKETS = [
+        {"id": "nyse",   "name": "NYSE",      "tz": "America/New_York",  "open": (9,30),  "close": (16,0)},
+        {"id": "lse",    "name": "London",     "tz": "Europe/London",     "open": (8,0),   "close": (16,30)},
+        {"id": "xetra",  "name": "Frankfurt",  "tz": "Europe/Berlin",     "open": (9,0),   "close": (17,30)},
+        {"id": "tse",    "name": "Tokyo",      "tz": "Asia/Tokyo",        "open": (9,0),   "close": (15,0)},
+        {"id": "sse",    "name": "Shanghai",   "tz": "Asia/Shanghai",     "open": (9,30),  "close": (15,0)},
+    ]
+
+    def _get_market_context(self) -> Dict:
+        """Determine which major markets are open/closed and return context for trading."""
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        open_markets = []
+        closed_markets = []
+        opening_soon = []  # within 30 min
+
+        for mkt in self.WORLD_MARKETS:
+            tz = ZoneInfo(mkt["tz"])
+            local = now_utc.astimezone(tz)
+            weekday = local.weekday()  # 0=Mon, 5=Sat, 6=Sun
+            now_min = local.hour * 60 + local.minute
+            open_min = mkt["open"][0] * 60 + mkt["open"][1]
+            close_min = mkt["close"][0] * 60 + mkt["close"][1]
+
+            if weekday >= 5:
+                closed_markets.append(mkt["name"])
+                continue
+
+            if open_min <= now_min < close_min:
+                session_pct = round((now_min - open_min) / (close_min - open_min) * 100)
+                open_markets.append(f"{mkt['name']} ({session_pct}% session)")
+            else:
+                closed_markets.append(mkt["name"])
+                # Check if opening within 30 minutes
+                mins_to_open = open_min - now_min
+                if 0 < mins_to_open <= 30:
+                    opening_soon.append(f"{mkt['name']} in {mins_to_open}m")
+
+        # Assess overall market environment
+        has_us_open = any("NYSE" in m for m in open_markets)
+        has_eu_open = any(m.startswith("London") or m.startswith("Frankfurt") for m in open_markets)
+        has_asia_open = any(m.startswith("Tokyo") or m.startswith("Shanghai") for m in open_markets)
+
+        if has_us_open:
+            session_label = "US session"
+            volatility_hint = "High liquidity & volatility expected"
+        elif has_eu_open:
+            session_label = "European session"
+            volatility_hint = "Moderate liquidity"
+        elif has_asia_open:
+            session_label = "Asian session"
+            volatility_hint = "Lower volatility for crypto, watch BTC/Asia pairs"
+        else:
+            session_label = "Off-hours"
+            volatility_hint = "Low traditional market liquidity; crypto-native moves"
+
+        return {
+            "session": session_label,
+            "open_markets": open_markets,
+            "closed_markets": closed_markets,
+            "opening_soon": opening_soon,
+            "volatility_hint": volatility_hint,
+            "has_us": has_us_open,
+            "has_eu": has_eu_open,
+            "has_asia": has_asia_open,
+        }
+
+    def _adjust_signal_for_market_hours(self, signal: Signal, market_ctx: Dict):
+        """Adjust signal confidence based on which markets are open."""
+        if not signal or signal.direction == "hold":
+            return
+
+        # Boost confidence during US market hours (highest correlation with crypto)
+        if market_ctx["has_us"]:
+            signal.confidence = min(signal.confidence + 0.02, 0.95)
+            signal.reasoning += f"; 🏛 {market_ctx['session']} active"
+
+        # Slight penalty during off-hours (less liquidity = more slippage risk)
+        elif not market_ctx["open_markets"]:
+            signal.confidence = max(signal.confidence - 0.02, 0.0)
+            signal.reasoning += "; ⏰ Off-hours — lower traditional liquidity"
+
+        # Alert if US market opening soon (expect volatility spike)
+        if any("NYSE" in m for m in market_ctx.get("opening_soon", [])):
+            signal.reasoning += "; ⚠️ NYSE opening soon — expect volatility"
 
     # ── Open Position ─────────────────────────────────────────────────────
 
