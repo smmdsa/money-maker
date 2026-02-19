@@ -16,6 +16,7 @@ from backend.models.database import TradingAgent, Portfolio, Trade, Decision, Ne
 from backend.services.market_data import MarketDataService
 from backend.services.trading_agent import TradingAgentService
 from backend.services.news_service import NewsService
+from backend.services.llm_service import LLMService
 from backend.services.strategies import STRATEGIES
 from pydantic import BaseModel
 
@@ -28,7 +29,8 @@ app = FastAPI(title="Money Maker - AI Trading Bot", version="1.0.0")
 
 # Initialize services
 market_service = MarketDataService()
-trading_service = TradingAgentService(market_service)
+llm_service = LLMService()
+trading_service = TradingAgentService(market_service, llm_service)
 news_service = NewsService()
 
 # Scheduler for background tasks
@@ -287,6 +289,8 @@ def get_agent_decisions(agent_id: int, limit: int = 50, db: Session = Depends(ge
         "cryptocurrency": d.cryptocurrency,
         "decision_type": d.decision_type,
         "reasoning": d.reasoning,
+        "llm_reasoning": d.llm_reasoning,
+        "llm_sentiment_adj": d.llm_sentiment_adj,
         "action_taken": d.action_taken,
         "confidence": d.confidence,
         "indicators": d.indicators,
@@ -488,6 +492,7 @@ def health_check():
     return {
         "status": "ok",
         "market_service": market_service.health_check(),
+        "llm_service": llm_service.health_check(),
         "timestamp": datetime.utcnow().isoformat()
     }
 

@@ -82,6 +82,8 @@ class Decision(Base):
     decision_type = Column(String)  # analysis, trade, hold
     cryptocurrency = Column(String)
     reasoning = Column(String)
+    llm_reasoning = Column(String, nullable=True)   # LLM-generated natural language analysis
+    llm_sentiment_adj = Column(Float, default=0.0)  # confidence adjustment from LLM
     indicators = Column(JSON)
     news_considered = Column(JSON, nullable=True)
     action_taken = Column(String)   # long, short, close_long, close_short, hold

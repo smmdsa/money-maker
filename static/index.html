@@ -349,6 +349,36 @@
             transition: width 1s linear;
         }
 
+        /* LLM Reasoning */
+        .llm-reasoning {
+            margin-top: 8px;
+            padding: 10px 12px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-left: 3px solid #00d2ff;
+            border-radius: 4px;
+            font-size: 0.88em;
+            line-height: 1.5;
+            color: #d0d0d0;
+        }
+        .llm-reasoning .llm-label {
+            font-size: 0.75em;
+            font-weight: 600;
+            color: #00d2ff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .llm-adj {
+            display: inline-block;
+            font-size: 0.78em;
+            padding: 1px 6px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+        .llm-adj.positive { background: rgba(0,200,83,0.2); color: #69f0ae; }
+        .llm-adj.negative { background: rgba(255,82,82,0.2); color: #ff5252; }
+        .llm-adj.neutral  { background: rgba(150,150,150,0.2); color: #aaa; }
+
         /* News links */
         .news-link {
             color: #333;
@@ -571,7 +601,7 @@
                     <div style="display:flex;align-items:center;gap:10px;">
                         <span id="dataSourceBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:#e3f2fd;color:#1565c0;font-weight:600;white-space:nowrap;"></span>
                         <div class="countdown" id="priceCountdown">
-                            <span id="priceCountdownText">60s</span>
+                            <span id="priceCountdownText">15s</span>
                             <div class="countdown-bar">
                                 <div class="countdown-bar-fill" id="priceCountdownBar" style="width: 100%"></div>
                             </div>
@@ -894,6 +924,21 @@
                 decisionLog.innerHTML = decisions.map(decision => {
                     const actionClass = decision.action_taken.includes('long') ? 'badge-long'
                         : decision.action_taken.includes('short') ? 'badge-short' : '';
+                    
+                    // LLM reasoning block
+                    let llmBlock = '';
+                    if (decision.llm_reasoning) {
+                        const adj = decision.llm_sentiment_adj || 0;
+                        const adjClass = adj > 0 ? 'positive' : adj < 0 ? 'negative' : 'neutral';
+                        const adjLabel = adj > 0 ? `+${(adj*100).toFixed(0)}%` : adj < 0 ? `${(adj*100).toFixed(0)}%` : '0%';
+                        llmBlock = `
+                            <div class="llm-reasoning">
+                                <div class="llm-label">🧠 AI Analysis <span class="llm-adj ${adjClass}">${adjLabel} conf.</span></div>
+                                ${decision.llm_reasoning}
+                            </div>
+                        `;
+                    }
+                    
                     return `
                     <div class="log-item">
                         <div class="log-time">${new Date(decision.timestamp).toLocaleString()}</div>
@@ -908,6 +953,7 @@
                             ${decision.news_considered && decision.news_considered.length > 0 ? `
                                 <br><em>News considered: ${decision.news_considered.map(n => n.title).join(', ')}</em>
                             ` : ''}
+                            ${llmBlock}
                         </div>
                     </div>
                 `}).join('');
@@ -1113,34 +1159,36 @@
         }
         
         // ── Countdown Timer ──────────────────────────────────────────────
-        const REFRESH_INTERVAL = 60; // seconds — matches backend cache TTL & trading cycle
-        let priceSecondsLeft = REFRESH_INTERVAL;
-        let newsSecondsLeft = REFRESH_INTERVAL;
+        const PRICE_REFRESH = 15;   // seconds — Binance allows fast polling
+        const NEWS_REFRESH  = 60;   // seconds — RSS feeds don't update faster
+        const AGENT_REFRESH  = 60;  // seconds — matches trading cycle
+        let priceSecondsLeft = PRICE_REFRESH;
+        let newsSecondsLeft = NEWS_REFRESH;
 
-        function updateCountdown(id, barId, secondsLeft) {
+        function updateCountdown(id, barId, secondsLeft, maxSeconds) {
             const textEl = document.getElementById(id);
             const barEl = document.getElementById(barId);
             if (textEl) textEl.textContent = `${secondsLeft}s`;
-            if (barEl) barEl.style.width = `${(secondsLeft / REFRESH_INTERVAL) * 100}%`;
+            if (barEl) barEl.style.width = `${(secondsLeft / maxSeconds) * 100}%`;
         }
 
         function startCountdownTick() {
             setInterval(() => {
                 priceSecondsLeft = Math.max(0, priceSecondsLeft - 1);
                 newsSecondsLeft = Math.max(0, newsSecondsLeft - 1);
-                updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft);
-                updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft);
+                updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft, PRICE_REFRESH);
+                updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft, NEWS_REFRESH);
             }, 1000);
         }
 
         function resetPriceCountdown() {
-            priceSecondsLeft = REFRESH_INTERVAL;
-            updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft);
+            priceSecondsLeft = PRICE_REFRESH;
+            updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft, PRICE_REFRESH);
         }
 
         function resetNewsCountdown() {
-            newsSecondsLeft = REFRESH_INTERVAL;
-            updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft);
+            newsSecondsLeft = NEWS_REFRESH;
+            updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft, NEWS_REFRESH);
         }
 
         // ── Refresh cycle ─────────────────────────────────────────────────
@@ -1168,11 +1216,12 @@
                 Charts.loadOHLC('bitcoin', 14);
             }
 
-            // Refresh prices & news every 60 seconds
-            setInterval(refreshPrices, REFRESH_INTERVAL * 1000);
-            setInterval(refreshNews, REFRESH_INTERVAL * 1000);
+            // Refresh prices every 15 seconds (Binance allows it)
+            setInterval(refreshPrices, PRICE_REFRESH * 1000);
+            // Refresh news every 60 seconds (RSS feeds are slow)
+            setInterval(refreshNews, NEWS_REFRESH * 1000);
 
-            // Refresh agents & selected details every 60 seconds
+            // Refresh agents & selected details every 60 seconds (trading cycle)
             setInterval(() => {
                 loadAgents();
                 if (selectedAgentId) {
@@ -1180,7 +1229,7 @@
                     loadTrades(selectedAgentId);
                     loadDecisions(selectedAgentId);
                 }
-            }, REFRESH_INTERVAL * 1000);
+            }, AGENT_REFRESH * 1000);
         });
     </script>
 </body>

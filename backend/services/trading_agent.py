@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import TradingAgent, Portfolio, Trade, Decision, NewsEvent
 from backend.services.market_data import MarketDataService
+from backend.services.llm_service import LLMService
 from backend.services.strategies import (
     StrategyEngine, Indicators, STRATEGIES,
     calculate_position_size, calculate_liquidation_price, Signal
@@ -24,9 +25,10 @@ logger = logging.getLogger(__name__)
 class TradingAgentService:
     """AI Trading Agent with futures support and configurable strategies."""
 
-    def __init__(self, market_service: MarketDataService):
+    def __init__(self, market_service: MarketDataService, llm_service: LLMService = None):
         self.market_service = market_service
         self.strategy_engine = StrategyEngine()
+        self.llm_service = llm_service
 
     # ── Main decision loop ────────────────────────────────────────────────
 
@@ -74,8 +76,13 @@ class TradingAgentService:
 
             if best_signal and best_coin and best_signal.direction in ("long", "short"):
                 if best_signal.confidence >= strategy_cfg.min_confidence:
+                    # Enrich with LLM analysis before opening
+                    llm_analysis = self._get_llm_analysis(
+                        best_coin, best_signal, strategy_key, db
+                    )
                     decision = self._open_position(
-                        agent, best_coin, best_signal, strategy_key, db
+                        agent, best_coin, best_signal, strategy_key, db,
+                        llm_analysis=llm_analysis,
                     )
                     return decision
 
@@ -263,6 +270,50 @@ class TradingAgentService:
 
         return indicators
 
+    # ── LLM Analysis ────────────────────────────────────────────────────
+
+    def _get_llm_analysis(self, coin: str, signal: Signal,
+                          strategy_key: str, db: Session):
+        """Get LLM-enriched analysis for a trade signal. Returns None if unavailable."""
+        if not self.llm_service or not self.llm_service.is_available:
+            return None
+
+        try:
+            # Gather news for LLM context
+            recent_news = db.query(NewsEvent).filter(
+                (NewsEvent.cryptocurrency == coin) |
+                (NewsEvent.cryptocurrency.is_(None))
+            ).order_by(NewsEvent.timestamp.desc()).limit(8).all()
+
+            news_items = [{
+                "title": n.title,
+                "sentiment": n.sentiment,
+                "impact_score": n.impact_score,
+                "source": n.source,
+            } for n in recent_news]
+
+            # Gather indicators
+            indicators = self._compute_indicators(coin) or {}
+
+            strategy_cfg = STRATEGIES.get(strategy_key)
+            strategy_name = strategy_cfg.name if strategy_cfg else strategy_key
+
+            current_price = indicators.get("current_price", 0)
+
+            return self.llm_service.analyze_trade(
+                coin=coin,
+                direction=signal.direction,
+                confidence=signal.confidence,
+                strategy_name=strategy_name,
+                indicators=indicators,
+                news_items=news_items,
+                current_price=current_price,
+                reasoning_technical=signal.reasoning,
+            )
+        except Exception as e:
+            logger.warning(f"LLM analysis failed for {coin}: {e}")
+            return None
+
     # ── News Sentiment ────────────────────────────────────────────────────
 
     def _get_news_sentiment(self, coin: str, db: Session) -> float:
@@ -293,7 +344,8 @@ class TradingAgentService:
 
     def _open_position(
         self, agent: TradingAgent, coin: str,
-        signal: Signal, strategy_key: str, db: Session
+        signal: Signal, strategy_key: str, db: Session,
+        llm_analysis=None,
     ) -> Dict:
         """Open a LONG or SHORT futures position."""
         current_price = self.market_service.get_coin_price(coin) or 0
@@ -362,11 +414,33 @@ class TradingAgentService:
         )
         db.add(trade)
 
+        # Apply LLM confidence adjustment if available
+        effective_confidence = signal.confidence
+        llm_reasoning = None
+        if llm_analysis:
+            effective_confidence = max(0, min(0.95,
+                signal.confidence + llm_analysis.sentiment_adjustment
+            ))
+            llm_reasoning = llm_analysis.reasoning
+            if llm_analysis.risk_notes:
+                llm_reasoning += f" ⚠ {llm_analysis.risk_notes}"
+            if llm_analysis.news_summary:
+                llm_reasoning += f" | News: {llm_analysis.news_summary}"
+            if llm_analysis.market_context:
+                llm_reasoning += f" | Market: {llm_analysis.market_context}"
+            logger.info(
+                f"Agent {agent.name}: LLM adj {signal.confidence:.2f} → "
+                f"{effective_confidence:.2f} ({llm_analysis.sentiment_adjustment:+.2f})"
+            )
+
         self._log_decision(db, agent.id, coin, {
             "action": direction,
             "reasoning": signal.reasoning,
-            "confidence": signal.confidence,
-        }, {}, [], strategy_key)
+            "confidence": effective_confidence,
+        }, {}, [], strategy_key,
+            llm_reasoning=llm_reasoning,
+            llm_sentiment_adj=llm_analysis.sentiment_adjustment if llm_analysis else 0.0,
+        )
 
         db.commit()
 
@@ -380,8 +454,9 @@ class TradingAgentService:
         return {
             "action": direction,
             "coin": coin,
-            "confidence": signal.confidence,
+            "confidence": effective_confidence,
             "reasoning": signal.reasoning,
+            "llm_reasoning": llm_reasoning,
             "strategy": strategy_key,
             "leverage": leverage,
             "margin": margin,
@@ -454,7 +529,9 @@ class TradingAgentService:
     def _log_decision(
         self, db: Session, agent_id: int, coin: str,
         decision: Dict, indicators: Dict,
-        news: List, strategy_key: str = ""
+        news: List, strategy_key: str = "",
+        llm_reasoning: str = None,
+        llm_sentiment_adj: float = 0.0,
     ):
         """Log AI decision to database."""
         news_data = ([{"title": n.title, "sentiment": n.sentiment}
@@ -475,6 +552,8 @@ class TradingAgentService:
             decision_type="analysis",
             cryptocurrency=coin,
             reasoning=decision.get("reasoning", ""),
+            llm_reasoning=llm_reasoning,
+            llm_sentiment_adj=llm_sentiment_adj,
             indicators=safe_indicators,
             news_considered=news_data,
             action_taken=decision.get("action", "hold"),

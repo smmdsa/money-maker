@@ -257,8 +257,8 @@ class MarketDataService:
     Fallback: CoinGecko (10 req/min free tier)
     """
 
-    PRICES_TTL = 60
-    MARKET_DATA_TTL = 120
+    PRICES_TTL = 15
+    MARKET_DATA_TTL = 15
     HISTORICAL_TTL = 900
     TRENDING_TTL = 600
 
