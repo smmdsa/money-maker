@@ -101,6 +101,8 @@ class BacktestResult:
     profit_factor: float
     max_consecutive_wins: int
     max_consecutive_losses: int
+    trailing_stops_moved: int      # how many times SL was trailed
+    trailing_sl_closes: int        # how many closes triggered by trailed SL
     equity_curve: List[Dict]   # [{time (epoch), equity, equity_gross, buy_hold}]
     trades: List[Dict]         # serialized BacktestTrade list
     candles_processed: int
@@ -227,6 +229,7 @@ class _Position:
     liquidation: float
     initial_sl: float = 0.0    # original SL for reference
     best_price: float = 0.0    # best price seen (for trailing stop)
+    trail_pct: float = 0.0     # trailing distance in % (0 = disabled)
     opened_at: str = ""
 
 
@@ -276,6 +279,8 @@ class Backtester:
         max_drawdown = 0.0
         total_commissions = 0.0
         total_funding = 0.0
+        trailing_stops_moved = 0
+        trailing_sl_closes = 0
 
         # Funding rate tracking
         hours_per_candle = _INTERVAL_HOURS.get(interval, 1)
@@ -303,17 +308,24 @@ class Backtester:
             close_prices = [k["close"] for k in klines[window_start:i + 1]]
             ohlc_slice = klines[window_start:i + 1]
 
-            # --- Check SL / TP / Liquidation on current candle ---
+            # --- Trailing stop update + SL / TP / Liquidation ---
             if position:
+                # Update trailing stops BEFORE exit checks
+                trail_moved = self._update_trailing_stop(position, high, low)
+                if trail_moved:
+                    trailing_stops_moved += 1
+
                 closed = self._check_position_exit(
                     position, high, low, close, ts,
                     balance, trades
                 )
                 if closed is not None:
-                    cash_back, cash_back_gross, close_fee = closed
+                    cash_back, cash_back_gross, close_fee, is_trailing_sl = closed
                     balance += cash_back
                     balance_gross += cash_back_gross
                     total_commissions += close_fee
+                    if is_trailing_sl:
+                        trailing_sl_closes += 1
                     position = None
 
             # --- Funding rate (every 8h on open position value) ---
@@ -492,6 +504,8 @@ class Backtester:
             profit_factor=round(profit_factor, 2),
             max_consecutive_wins=max_consec_wins,
             max_consecutive_losses=max_consec_losses,
+            trailing_stops_moved=trailing_stops_moved,
+            trailing_sl_closes=trailing_sl_closes,
             equity_curve=[
                 {
                     "time": int(datetime.fromisoformat(e["timestamp"]).timestamp()),
@@ -525,7 +539,8 @@ class Backtester:
             f"gross {total_return_gross:+.2f}% / net {total_return:+.2f}% return, "
             f"{len(close_trades)} trades, fees ${total_fees:.2f} "
             f"(comm ${total_commissions:.2f} + fund ${total_funding:.2f}), "
-            f"{win_rate:.0f}% win rate, {max_drawdown:.1f}% max DD"
+            f"{win_rate:.0f}% win rate, {max_drawdown:.1f}% max DD, "
+            f"trailing: {trailing_stops_moved} moves / {trailing_sl_closes} closes"
         )
 
         return result
@@ -581,9 +596,35 @@ class Backtester:
             liquidation=liq,
             initial_sl=sl,
             best_price=price,
+            trail_pct=signal.stop_loss_pct,   # trailing distance = initial SL %
             opened_at=ts,
         )
         return pos, open_fee
+
+    @staticmethod
+    def _update_trailing_stop(pos: _Position, high: float, low: float) -> bool:
+        """Update trailing stop based on candle high/low.
+        Returns True if SL was moved. DRY: mirrors live _update_trailing_stops().
+        """
+        if pos.trail_pct <= 0:
+            return False
+
+        moved = False
+        if pos.direction == "long":
+            if high > pos.best_price:
+                pos.best_price = high
+            new_sl = pos.best_price * (1 - pos.trail_pct / 100)
+            if new_sl > pos.stop_loss:
+                pos.stop_loss = new_sl
+                moved = True
+        else:  # short
+            if pos.best_price == 0 or low < pos.best_price:
+                pos.best_price = low
+            new_sl = pos.best_price * (1 + pos.trail_pct / 100)
+            if pos.stop_loss <= 0 or new_sl < pos.stop_loss:
+                pos.stop_loss = new_sl
+                moved = True
+        return moved
 
     def _check_position_exit(
         self, pos: _Position, high: float, low: float,
@@ -591,12 +632,14 @@ class Backtester:
         balance: float, trades: List[BacktestTrade],
     ) -> Optional[tuple]:
         """Check if position should be closed by SL/TP/liquidation.
-        Returns (net_cash_back, gross_cash_back) tuple if closed, else None.
-        net_cash_back = margin + pnl - close_fee
-        gross_cash_back = margin + pnl (no fee)
+        Returns (net_cash_back, gross_cash_back, close_fee, is_trailing_sl) if closed, else None.
         """
         exit_price = None
         reason = ""
+        is_trailing_sl = False
+
+        # Detect if SL has been trailed from its original position
+        sl_trailed = pos.trail_pct > 0 and abs(pos.stop_loss - pos.initial_sl) / max(pos.initial_sl, 1e-9) > 0.001
 
         # ── Check exit conditions (SL/TP/Liquidation only) ──
         if pos.direction == "long":
@@ -606,7 +649,11 @@ class Backtester:
                 pnl = -pos.margin
             elif low <= pos.stop_loss:
                 exit_price = pos.stop_loss
-                reason = "🛑 Stop-loss hit"
+                if sl_trailed:
+                    reason = f"🔄 Trailing SL hit (moved from ${pos.initial_sl:.2f})"
+                    is_trailing_sl = True
+                else:
+                    reason = "🛑 Stop-loss hit"
                 pnl = self._calc_pnl(pos, exit_price)
             elif high >= pos.take_profit:
                 exit_price = pos.take_profit
@@ -619,7 +666,11 @@ class Backtester:
                 pnl = -pos.margin
             elif high >= pos.stop_loss:
                 exit_price = pos.stop_loss
-                reason = "🛑 Stop-loss hit"
+                if sl_trailed:
+                    reason = f"🔄 Trailing SL hit (moved from ${pos.initial_sl:.2f})"
+                    is_trailing_sl = True
+                else:
+                    reason = "🛑 Stop-loss hit"
                 pnl = self._calc_pnl(pos, exit_price)
             elif low <= pos.take_profit:
                 exit_price = pos.take_profit
@@ -646,7 +697,7 @@ class Backtester:
             commission=close_fee,
             reason=reason,
         ))
-        return cash_back, cash_back_gross, close_fee
+        return cash_back, cash_back_gross, close_fee, is_trailing_sl
 
     @staticmethod
     def _calc_pnl(pos: _Position, price: float) -> float:

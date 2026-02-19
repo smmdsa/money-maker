@@ -2479,6 +2479,10 @@
                 { label: 'Trades', value: data.total_trades, color: '#2196f3' },
                 { label: 'Net Balance', value: '$' + data.final_balance.toLocaleString('en-US', {maximumFractionDigits: 2}),
                   color: data.final_balance >= data.initial_balance ? '#4caf50' : '#f44336' },
+                { label: 'Trailing SL Moves', value: data.trailing_stops_moved ?? 0,
+                  color: '#1565c0', tooltip: `SL trailed ${data.trailing_stops_moved ?? 0} times | Trailing closes: ${data.trailing_sl_closes ?? 0}` },
+                { label: 'Trailing Closes', value: data.trailing_sl_closes ?? 0,
+                  color: (data.trailing_sl_closes ?? 0) > 0 ? '#4caf50' : '#999' },
             ];
             grid.innerHTML = m.map(i => `
                 <div class="card" style="text-align:center;padding:14px 10px;"${i.tooltip ? ` title="${i.tooltip}"` : ''}>
