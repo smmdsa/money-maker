@@ -537,6 +537,18 @@ class MarketDataService:
         prices = self.get_current_prices()
         return prices.get(coin)
 
+    def get_fresh_prices(self, coins: List[str]) -> Dict[str, float]:
+        """Get prices bypassing cache — used by the risk monitor for real-time
+        SL/TP/liquidation checks on open positions."""
+        prices = self._binance.get_prices(coins)
+        if prices:
+            for coin, price in prices.items():
+                self._last_known_prices[coin] = price
+            return prices
+        # Fallback to cached prices if Binance fails
+        return {c: self._last_known_prices[c] for c in coins
+                if c in self._last_known_prices}
+
     # ── Market Data ───────────────────────────────────────────────────────
 
     def get_all_market_data(self) -> List[Dict]:

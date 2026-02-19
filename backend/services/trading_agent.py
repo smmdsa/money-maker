@@ -529,6 +529,116 @@ class TradingAgentService:
             "leverage": pos.leverage,
         }
 
+    # ── Risk Monitor (lightweight, runs every 5s) ─────────────────────────
+
+    def check_risk_all_agents(self, db: Session) -> List[Dict]:
+        """Lightweight risk check on ALL open positions across all active agents.
+        Only checks SL/TP/liquidation — no indicator computation, no strategy
+        evaluation. Designed to run every 5 seconds.
+        Returns list of close actions taken.
+        """
+        actions = []
+
+        # Get all active agents with open positions
+        agents = db.query(TradingAgent).filter(
+            TradingAgent.status == "active"
+        ).all()
+
+        # Collect unique coins that have open positions
+        positions_by_coin: Dict[str, List] = {}  # coin -> [(agent, pos)]
+        for agent in agents:
+            for pos in agent.portfolio:
+                if pos.amount > 0:
+                    positions_by_coin.setdefault(pos.cryptocurrency, []).append((agent, pos))
+
+        if not positions_by_coin:
+            return []
+
+        # Single API call to get fresh prices for all coins with positions
+        fresh_prices = self.market_service.get_fresh_prices(list(positions_by_coin.keys()))
+        if not fresh_prices:
+            return []
+
+        # Check each position
+        for coin, agent_positions in positions_by_coin.items():
+            price = fresh_prices.get(coin)
+            if not price or price <= 0:
+                continue
+
+            for agent, pos in agent_positions:
+                result = self._risk_check_position(agent, pos, price, db)
+                if result:
+                    actions.append(result)
+
+        if actions:
+            db.commit()
+
+        return actions
+
+    def _risk_check_position(
+        self, agent: TradingAgent, pos: Portfolio,
+        current_price: float, db: Session
+    ) -> Optional[Dict]:
+        """Check a single position for SL/TP/liquidation. Ultra-lightweight."""
+        strategy_key = agent.strategy or "confluence_master"
+
+        # 1. Liquidation
+        if pos.leverage > 1 and pos.liquidation_price > 0:
+            liquidated = (
+                (pos.position_type == "long" and current_price <= pos.liquidation_price) or
+                (pos.position_type == "short" and current_price >= pos.liquidation_price)
+            )
+            if liquidated:
+                logger.warning(
+                    f"⚠ RISK MONITOR: Agent {agent.name} LIQUIDATED "
+                    f"{pos.cryptocurrency} @ ${current_price:.2f}"
+                )
+                return self._close_position(
+                    agent, pos, current_price, db,
+                    reason=f"⚡ LIQUIDATED (risk monitor) at ${current_price:.2f}"
+                           f" (liq: ${pos.liquidation_price:.2f})",
+                    force_loss=-pos.margin,
+                    strategy_key=strategy_key,
+                )
+
+        # 2. Stop-loss
+        if pos.stop_loss_price > 0:
+            sl_hit = (
+                (pos.position_type == "long" and current_price <= pos.stop_loss_price) or
+                (pos.position_type == "short" and current_price >= pos.stop_loss_price)
+            )
+            if sl_hit:
+                logger.info(
+                    f"⚡ RISK MONITOR: Agent {agent.name} SL hit "
+                    f"{pos.cryptocurrency} @ ${current_price:.2f}"
+                )
+                return self._close_position(
+                    agent, pos, current_price, db,
+                    reason=f"⚡ Stop-loss (risk monitor) at ${current_price:.2f}"
+                           f" (SL: ${pos.stop_loss_price:.2f})",
+                    strategy_key=strategy_key,
+                )
+
+        # 3. Take-profit
+        if pos.take_profit_price > 0:
+            tp_hit = (
+                (pos.position_type == "long" and current_price >= pos.take_profit_price) or
+                (pos.position_type == "short" and current_price <= pos.take_profit_price)
+            )
+            if tp_hit:
+                logger.info(
+                    f"⚡ RISK MONITOR: Agent {agent.name} TP hit "
+                    f"{pos.cryptocurrency} @ ${current_price:.2f}"
+                )
+                return self._close_position(
+                    agent, pos, current_price, db,
+                    reason=f"⚡ Take-profit (risk monitor) at ${current_price:.2f}"
+                           f" (TP: ${pos.take_profit_price:.2f})",
+                    strategy_key=strategy_key,
+                )
+
+        return None
+
     # ── Decision Logging ──────────────────────────────────────────────────
 
     def _log_decision(

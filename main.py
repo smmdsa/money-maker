@@ -442,6 +442,31 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Background tasks
 
+async def run_risk_monitor():
+    """Lightweight risk check every 5 seconds.
+    Only checks SL/TP/liquidation on open positions — no indicators, no strategies.
+    """
+    def _sync_risk_check():
+        try:
+            db = next(get_db())
+            actions = trading_service.check_risk_all_agents(db)
+            db.close()
+            return actions
+        except Exception as e:
+            logger.error(f"Risk monitor error: {e}")
+            return []
+
+    actions = await asyncio.to_thread(_sync_risk_check)
+
+    # Broadcast any closes triggered by the risk monitor
+    for action in (actions or []):
+        await manager.broadcast({
+            "type": "risk_alert",
+            "decision": action,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+
 async def run_trading_cycle():
     """Background task to run trading for all active agents.
     All blocking market/DB calls are offloaded to a thread pool
@@ -571,11 +596,12 @@ async def startup_event():
     # Initialize database
     init_db()
     
-    # Start background scheduler (run every 60 seconds)
-    scheduler.add_job(run_trading_cycle, 'interval', seconds=60)
+    # Start background scheduler
+    scheduler.add_job(run_trading_cycle, 'interval', seconds=60, id='trading_cycle')
+    scheduler.add_job(run_risk_monitor, 'interval', seconds=5, id='risk_monitor')
     scheduler.start()
     
-    logger.info("Application started successfully")
+    logger.info("Application started — Trading cycle: 60s | Risk monitor: 5s")
 
 
 @app.on_event("shutdown")

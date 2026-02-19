@@ -454,7 +454,75 @@ Reescritura del Trend Rider aplicando los principios del Scalper Pro:
 
 ---
 
-### 5. 🔔 Notificaciones + Alertas (Telegram / Email)
+### 5. ⚡ Risk Monitor — Monitoreo de Posiciones Abiertas en Tiempo Real
+
+**Impacto**: Crítico (gestión de riesgo)  
+**Área**: Trading / Risk Management  
+**Dependencias**: Feature #2 (futuros con SL/TP/liquidación)
+
+**Problema**: El ciclo de trading cada 60s deja posiciones abiertas sin supervisar durante largos períodos. Un flash crash de BTC del 5% en 10 segundos con apalancamiento 5x = -25% antes de que el sistema reaccione. En crypto (mercado 24/7), esto es un riesgo real.
+
+**Solución**: Dos loops independientes con responsabilidades separadas.
+
+| Loop | Frecuencia | Responsabilidad |
+|------|-----------|----------------|
+| **Decision Loop** (existente) | 60s | Análisis técnico completo, señales, abrir/cerrar por estrategia |
+| **Risk Monitor** (nuevo) | 5s | SOLO verificar SL/TP/liquidación en posiciones abiertas |
+
+#### Fase 1: Polling Risk Monitor (5s) — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19
+
+Loop ligero que cada 5 segundos:
+1. Obtiene lista de agentes activos con posiciones abiertas
+2. Consulta precio actual de cada coin con posición (`GET /fapi/v1/ticker/price`)
+3. Verifica: `precio <= stop_loss` → cierra, `precio >= take_profit` → cierra, `precio <= liquidation` → cierra urgente
+4. **NO** calcula indicadores ni evalúa estrategias — es puramente defensivo
+5. Notifica por WebSocket si cierra alguna posición
+
+**Frecuencia 5s — justificación:**
+- ✅ Detecta flash crashes (un crash de 30s se detecta al menos 6 veces)
+- ✅ Binance-friendly (~12 req/min por posición, bien dentro del límite de 1200)
+- ✅ No genera ruido (no toma decisiones, solo protege)
+- ❌ 1s sería excesivo (rate limits, CPU, false alerts por micro-ticks)
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/trading_agent.py` | `check_risk()` — método ligero de verificación SL/TP/liquidación |
+| `main.py` | Segundo job APScheduler cada 5s, `_sync_risk_check()` |
+
+#### Fase 2: Binance WebSocket Streams (futura)
+
+**Estado**: 📋 Planificado  
+**Impacto**: Latencia de monitoreo de ~5s → ~100ms
+
+Reemplazar el polling de Fase 1 por WebSocket push de Binance Futures:
+
+```
+wss://fstream.binance.com/ws/btcusdt@ticker
+```
+
+**Ventajas vs polling:**
+- **Zero polling**: Binance envía el precio cuando cambia, no necesitamos preguntar
+- **Latencia ~100ms**: Detección casi instantánea de SL/TP/liquidación
+- **Menos requests**: No consume el rate limit de REST API
+- **Multi-stream**: Un solo WebSocket puede suscribirse a múltiples símbolos
+
+**Implementación planificada:**
+- `backend/services/ws_monitor.py` — Manager de WebSocket connections
+- Suscripción dinámica: cuando un agente abre posición en BTCUSDT → subscribe al stream
+- Cuando cierra → unsubscribe
+- Reconnect automático con backoff exponencial
+- Fallback a polling (Fase 1) si WebSocket se desconecta
+
+**Complejidad**: Media-Alta (gestión de conexiones async, reconexión, estado compartido)
+
+---
+
+### 6. 🔔 Notificaciones + Alertas (Telegram / Email)
 
 **Impacto**: Alto  
 **Área**: UX / Engagement  
@@ -548,7 +616,9 @@ Bot de Telegram y/o email para notificar:
 4c. Scalper Pro Variantes (1m/3m/5m/15m) ──→ ✅ COMPLETADO (2026-02-19)
 4d. Modelo de Comisiones y Fees ──→ ✅ COMPLETADO (2026-02-19)
 4e. Trend Rider v2 (3:1 R:R) ──→ ✅ COMPLETADO (2026-02-19)
-5.  Notificaciones ──→ next (add-on independiente)
+5.  Risk Monitor (5s polling) ──→ ✅ COMPLETADO (2026-02-19)
+5b. Risk Monitor (WebSocket) ──→ planificado (Fase 2)
+6.  Notificaciones ──→ next (add-on independiente)
 ```
 
 ---
