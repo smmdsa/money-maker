@@ -1293,6 +1293,7 @@ class StrategyEngine:
         elif confidence < 0.5:
             leverage = max(1, cfg.default_leverage - 1)
 
+
                 def _sig(direction, conf, lev, reason, scores):
             return Signal(direction, conf, lev, stop_loss_pct, take_profit_pct,
                           reason, scores, trail_pct=trail_pct)
@@ -1362,7 +1363,6 @@ class StrategyEngine:
                 )
 
         return _sig(
-            "neutral", confidence, leverage,
             f"HOLD — {reasoning_str} (L={long_score}/S={short_score})",
             {"long": long_score, "short": short_score}
         )
