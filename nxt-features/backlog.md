@@ -1,6 +1,6 @@
 # Money Maker — Feature Backlog
 
-> Última actualización: 2026-02-19 (sesión 3)
+> Última actualización: 2026-02-19 (sesión 4)
 
 ---
 
@@ -86,6 +86,12 @@
 | ⚡ Refresh 15s | Precios cada 15s (Binance lo permite), news y agents cada 60s | 2026-02-19 |
 | 💰 Smart price formatting | Decimales variables según magnitud del precio (fmtPrice) | 2026-02-19 |
 | 🔍 Trade → Decision modal | Click en un trade abre modal con el AI Decision completo que lo originó | 2026-02-19 |
+| 📊 Positions full-width | Posiciones abiertas como cards full-width con SL/TP/Liq/progress bar | 2026-02-19 |
+| 💵 Expected P&L | Profit esperado en TP y pérdida esperada en SL debajo de cada precio | 2026-02-19 |
+| ✕ Manual close buttons | Botones para cerrar posiciones individuales o todas a la vez | 2026-02-19 |
+| 📈 Chart price sync | Último candle se actualiza cada 15s con precio real | 2026-02-19 |
+| 🎯 Account profiles | 4 presets (Micro/Small/Standard/Large) con auto-suggest por balance | 2026-02-19 |
+| 🕐 Market clocks | 8 mercados mundiales con hora real, alertas y trading context | 2026-02-19 |
 
 ---
 
@@ -522,6 +528,165 @@ wss://fstream.binance.com/ws/btcusdt@ticker
 
 ---
 
+### 5b. 📊 Open Positions UI — Rediseño Full-Width — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: UX / Dashboard
+
+**Problema**: Las posiciones abiertas se mostraban como una tabla pequeña dentro del card de Agent Details, difícil de leer y sin datos de riesgo.
+
+**Solución implementada:**
+
+- **Sección full-width independiente** entre Charts y Equity Curve (como una sección propia)
+- **Position cards** (`.pos-card`) con layout grid 4 columnas:
+  - Col 1: Coin + badges (LONG/SHORT, leverage)
+  - Col 2: Precios SL/TP/Liquidación con **profit/loss esperado** debajo de cada uno
+  - Col 3: P&L actual (valor + %)
+  - Col 4: Botón Close individual
+- **Barra de progreso SL↔TP**: Colored bar (rojo→naranja→verde) mostrando posición actual entre SL y TP
+- **Botón "Close All"**: En el header de la sección, cierra todas las posiciones del agente
+- **Expected Profit/Loss**: Debajo de SL muestra pérdida esperada, debajo de TP muestra ganancia esperada
+
+**Endpoints nuevos:**
+- `POST /api/agents/{id}/positions/{pos_id}/close` — Cierre manual individual
+- `POST /api/agents/{id}/positions/close-all` — Cierre masivo
+
+**Método nuevo en trading agent:**
+- `close_position_manual()` — Obtiene precio actual, llama a `_close_position()` con razón "🖐 Manual close by user"
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `static/index.html` | Sección `.positions-section` full-width, `renderPositions()`, `closePosition()`, `closeAllPositions()`, CSS pos-cards |
+| `main.py` | 2 endpoints nuevos (close position, close all) |
+| `backend/services/trading_agent.py` | `close_position_manual()` método público |
+
+---
+
+### 5c. 📈 Chart Price Sync — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: UX / Charts
+
+**Problema**: El chart de candlestick solo cargaba datos OHLC al iniciar o cambiar de coin/timeframe. El último candle nunca se actualizaba con el precio en tiempo real.
+
+**Solución implementada:**
+
+- `Charts.updateLastPrice(coin, price)` — Actualiza el close/high/low del último candle vía `candlestickSeries.update()`
+- Llamado cada 15 segundos desde `refreshPrices()` usando el precio de `/api/market/{coin}`
+- `lastOhlcData` state tracking para mantener referencia al último dato
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `static/charts.js` | `lastOhlcData` array, `updateLastPrice()` método público |
+| `static/index.html` | `refreshPrices()` llama a `Charts.updateLastPrice()` |
+
+---
+
+### 5d. 🎯 Account Profiles — Configuración de Leverage/Risk por Agente — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Trading / Configuración
+
+**Problema**: Cuentas pequeñas ($50-100) con strategy defaults (3x leverage, 2.5% risk) generan margins de $4 y necesitan movimientos de 33%+ para alcanzar TP. Resultado: semanas/meses sin trades rentables.
+
+**Solución implementada:**
+
+#### 4 Perfiles de Cuenta
+
+| Perfil | Balance | Lev Min | Lev Max | Risk Min | Risk Max | Concepto |
+|--------|:-------:|:-------:|:-------:|:--------:|:--------:|----------|
+| ⚡ **Micro** | $50–100 | 10x | 25x | 5% | 10% | High leverage + high risk = $1-2 profit por trade |
+| 🔥 **Small** | $100–500 | 5x | 15x | 3% | 7% | Balance entre riesgo y crecimiento |
+| 📊 **Standard** | $500–2k | 1x | 10x | Auto | Auto | Usa defaults de la estrategia |
+| 🏦 **Large** | $2k+ | 1x | 5x | 1% | 3% | Conservador, protege capital |
+
+#### Auto-sugerencia
+- `suggestProfile()` evalúa el balance ingresado y pre-selecciona el perfil recomendado
+- El usuario puede cambiar libremente entre perfiles o ajustar sliders manualmente
+
+#### Integración en Trading Agent
+- `min_leverage` se aplica como **floor**: `leverage = max(signal.leverage, agent.min_leverage)`
+- `risk_pct_min/max` se pasa a `calculate_position_size()` que clampea el `effective_risk`
+
+#### DB Migration
+- 3 columnas nuevas en `TradingAgent`: `min_leverage` (INT, default 1), `risk_pct_min` (FLOAT, default 0.0), `risk_pct_max` (FLOAT, default 0.0)
+- Migración con `ALTER TABLE ADD COLUMN` — sin borrar datos
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/models/database.py` | 3 columnas nuevas en TradingAgent |
+| `backend/services/strategies.py` | `calculate_position_size()` acepta `risk_pct_min/max` overrides |
+| `backend/services/trading_agent.py` | `_open_position()` aplica min_leverage + pasa risk bounds |
+| `main.py` | AgentCreate expandido, validación, agent detail response |
+| `static/index.html` | Modal rediseñado: 4 profile buttons, leverage range sliders, risk % sliders, auto-suggest, agent details badges |
+
+---
+
+### 7. 🕐 Market Clocks — Relojes de Mercados Mundiales — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: UX / Trading Context
+
+**Implementación entregada:**
+
+#### Sección UI (Market Clocks Bar)
+- Barra oscura en la parte superior del dashboard debajo del nav
+- **8 mercados** monitoreados: NYSE, NASDAQ, London (LSE), Frankfurt (Xetra), Tokyo (TSE), Shanghai (SSE), Hong Kong (HKEX), Sydney (ASX)
+- **Tarjeta local**: Detecta timezone del usuario, muestra hora local con nombre de ciudad
+- **Cada tarjeta muestra**: Bandera/código de país, nombre del mercado, hora local en tiempo real (actualiza cada segundo), estado (OPEN/PRE-MKT/CLOSED), countdown hasta próxima apertura o cierre, barra de progreso de la sesión
+- **Colores por estado**: Verde (open), naranja (pre-market), rojo (closed) con bordes y opacidad diferenciados
+- Scroll horizontal para pantallas pequeñas
+
+#### Alertas de Apertura/Cierre
+- **Browser Notifications**: Pide permiso al cargar la app; notifica cuando un mercado abre o cierra
+- **Toast in-app**: Notificación animada (slide-in desde la derecha) con borde verde (apertura) o rojo (cierre), desaparece en 6 segundos
+- **Anti-duplicados**: `marketAlertFired` object trackea estado previo de cada mercado
+
+#### Backend
+- **`GET /api/market/hours`**: Retorna array con status de los 8 mercados (id, name, status, local_time, session_pct)
+- **`get_market_hours_context()`**: Función reutilizable por trading agent
+
+#### Integración con Trading Agent
+- **`_get_market_context()`**: Calcula qué mercados están abiertos, % de sesión, cuáles abren pronto (<30 min)
+- **Ajuste de confianza**:
+  - +2% durante sesión US (mayor correlación con crypto)
+  - -2% en off-hours (menor liquidez tradicional)
+- **Advertencia de volatilidad**: Si NYSE abre en <30 min → warning en el razonamiento del signal
+- **Contexto para LLM (Gemini)**: `market_session`, `open_markets`, `volatility_hint`, `markets_opening_soon` enviados al modelo para análisis más informados
+
+**Mercados y horarios:**
+
+| Mercado | Timezone | Apertura | Cierre | Pre-Market |
+|---------|----------|:--------:|:------:|:----------:|
+| NYSE | America/New_York | 09:30 | 16:00 | 04:00 |
+| NASDAQ | America/New_York | 09:30 | 16:00 | 04:00 |
+| London (LSE) | Europe/London | 08:00 | 16:30 | 07:00 |
+| Frankfurt (Xetra) | Europe/Berlin | 09:00 | 17:30 | 08:00 |
+| Tokyo (TSE) | Asia/Tokyo | 09:00 | 15:00 | 08:00 |
+| Shanghai (SSE) | Asia/Shanghai | 09:30 | 15:00 | 09:15 |
+| Hong Kong (HKEX) | Asia/Hong_Kong | 09:30 | 16:00 | 09:00 |
+| Sydney (ASX) | Australia/Sydney | 10:00 | 16:00 | 07:00 |
+
+**Archivos creados / modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `static/index.html` | CSS market clocks (cards, estados, toast, animaciones), HTML market clocks bar, JS engine (MARKETS array, getMarketStatus, renderMarketClocks, checkMarketAlert, fireMarketAlert, showMarketToast, requestNotificationPermission), 1s interval |
+| `main.py` | `from zoneinfo import ZoneInfo`, `WORLD_MARKETS` data, `get_market_hours_context()`, `GET /api/market/hours` endpoint (antes de `/{coin}` para evitar catch-all) |
+| `backend/services/trading_agent.py` | `from zoneinfo import ZoneInfo`, `WORLD_MARKETS`, `_get_market_context()`, `_adjust_signal_for_market_hours()`, integración en `_scan_for_best_signal()` y `_get_llm_analysis()` |
+
+---
+
 ### 6. 🔔 Notificaciones + Alertas (Telegram / Email)
 
 **Impacto**: Alto  
@@ -617,7 +782,11 @@ Bot de Telegram y/o email para notificar:
 4d. Modelo de Comisiones y Fees ──→ ✅ COMPLETADO (2026-02-19)
 4e. Trend Rider v2 (3:1 R:R) ──→ ✅ COMPLETADO (2026-02-19)
 5.  Risk Monitor (5s polling) ──→ ✅ COMPLETADO (2026-02-19)
-5b. Risk Monitor (WebSocket) ──→ planificado (Fase 2)
+5b. Open Positions UI (full-width) ──→ ✅ COMPLETADO (2026-02-19)
+5c. Chart Price Sync ──→ ✅ COMPLETADO (2026-02-19)
+5d. Account Profiles (Micro/Small/Std/Large) ──→ ✅ COMPLETADO (2026-02-19)
+5e. Risk Monitor (WebSocket) ──→ planificado (Fase 2)
+7.  Market Clocks (World Markets) ──→ ✅ COMPLETADO (2026-02-19)
 6.  Notificaciones ──→ next (add-on independiente)
 ```
 
@@ -627,34 +796,36 @@ Bot de Telegram y/o email para notificar:
 
 | Componente | Tecnología | Detalle |
 |------------|-----------|---------|
-| Backend | FastAPI + uvicorn | Puerto 8001, 19 endpoints + WebSocket |
+| Backend | FastAPI + uvicorn | Puerto 8001, 21+ endpoints + WebSocket |
 | Base de datos | SQLite + SQLAlchemy | 6 modelos (TradingAgent, Portfolio, Trade, Decision, PortfolioSnapshot, NewsEvent) |
 | Market Data (primary) | **Binance API** | 1200 req/min, sin API key, precios + OHLC + históricos + volumen |
 | Market Data (fallback) | CoinGecko API | 10 req/min free tier, RateLimiter con 5s max wait |
 | Noticias | RSS feeds | CoinDesk, CoinTelegraph, Bitcoin Magazine + CryptoPanic (opcional) |
-| Charts | TradingView Lightweight Charts v4 | CDN, open source, candlestick + indicadores |
+| Charts | TradingView Lightweight Charts v4 | CDN, open source, candlestick + indicadores + price sync |
 | Indicadores | RSI, MACD, BB, EMA, SMA, ATR, ADX, StochRSI, Volume | Library completa en strategies.py |
 | Estrategias | 10 (trend/mean_rev/momentum/scalper×5/grid/confluence) | StrategyEngine con scoring + signal generation |
 | Backtesting | Motor completo con commission model | Replay de klines, dual balance (gross/net), funding rate |
 | CLI | backtest_cli.py | Comparativas rápidas, --compare, --scalpers |
 | Futuros | LONG/SHORT, leverage 1-125x, liquidation, SL/TP | Position sizing profesional |
-| Scheduler | APScheduler | Ciclo de trading cada 60s |
+| Market Clocks | 8 mercados mundiales | Hora real, alertas open/close, integración con agent decisions |
+| Account Profiles | 4 presets (Micro/Small/Standard/Large) | Auto-suggest por balance, leverage/risk ranges |
+| Scheduler | APScheduler | Ciclo de trading 60s + Risk monitor 5s |
 | Async | asyncio.to_thread() | Trading cycle nunca bloquea el event loop |
 
-### Estructura de archivos (~9,500+ líneas)
+### Estructura de archivos (~11,000+ líneas)
 
 | Archivo | Líneas | Responsabilidad |
 |---------|--------|----------------|
-| `main.py` | 595+ | Endpoints, scheduler, WebSocket, backtest API |
-| `backend/services/strategies.py` | 1400+ | Indicadores técnicos, 10 estrategias, position sizing |
+| `main.py` | 735+ | Endpoints, scheduler, WebSocket, backtest API, market hours |
+| `backend/services/strategies.py` | 1410+ | Indicadores técnicos, 10 estrategias, position sizing con risk overrides |
 | `backend/services/backtester.py` | 700+ | Motor de backtesting, commission model, sliding window |
-| `backend/services/market_data.py` | 780+ | RateLimiter, BinanceProvider (Futures+Spot), MarketDataService |
-| `backend/services/trading_agent.py` | 570+ | Futures lifecycle, strategy engine, LLM integration |
+| `backend/services/market_data.py` | 795+ | RateLimiter, BinanceProvider (Futures+Spot), MarketDataService, get_fresh_prices |
+| `backend/services/trading_agent.py` | 770+ | Futures lifecycle, strategy engine, LLM integration, risk monitor, market hours context |
 | `backend/services/llm_service.py` | 270 | Gemini 2.0 Flash, LLMAnalysis, rate limiting |
 | `backend/services/news_service.py` | 313 | RSS feeds, sentimiento por keywords |
-| `backend/models/database.py` | 130+ | 6 modelos SQLAlchemy (con campos futures + LLM + decision_id) |
-| `static/index.html` | 1830+ | Dashboard + Backtesting SPA, strategy picker, futures UI, LLM blocks |
-| `static/charts.js` | 359 | Módulo de charts TradingView |
+| `backend/models/database.py` | 130+ | 6 modelos SQLAlchemy (con campos futures + LLM + decision_id + account profiles) |
+| `static/index.html` | 2600+ | Dashboard + Backtesting SPA, strategy picker, futures UI, LLM blocks, market clocks, account profiles, position cards |
+| `static/charts.js` | 390+ | Módulo de charts TradingView con price sync |
 | `backtest_cli.py` | 320+ | CLI de backtesting, comparativas, colores |
 
 ---
