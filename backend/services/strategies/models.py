@@ -41,8 +41,9 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     "trend_rider": StrategyConfig(
         key="trend_rider",
         name="Trend Rider",
-        description="Follows strong trends using EMA alignment + ADX + pullback entries. "
-                    "6-layer signal architecture with 3:1 R:R. Best in trending markets.",
+        description="Follows strong trends using EMA alignment + slope + ADX/DI crossover + "
+                    "pullback entries. 8-layer signal scoring with wider 2xATR stops. "
+                    "Best with trailing OFF in trending markets.",
         style="trend",
         default_leverage=3,
         max_leverage=5,

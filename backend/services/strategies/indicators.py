@@ -216,12 +216,23 @@ class Indicators:
         for dx, _, _ in dx_values[period:]:
             adx_val = (adx_val * (period - 1) + dx) / period
 
+        # DI crossover detection
+        cur_plus, cur_minus = dx_values[-1][1], dx_values[-1][2]
+        prev_plus, prev_minus = dx_values[-2][1], dx_values[-2][2] if len(dx_values) >= 2 else (cur_plus, cur_minus)
+
+        di_crossover = "none"
+        if prev_plus <= prev_minus and cur_plus > cur_minus:
+            di_crossover = "bullish"
+        elif prev_plus >= prev_minus and cur_plus < cur_minus:
+            di_crossover = "bearish"
+
         return {
             "adx": adx_val,
-            "plus_di": dx_values[-1][1],
-            "minus_di": dx_values[-1][2],
+            "plus_di": cur_plus,
+            "minus_di": cur_minus,
             "trending": adx_val > 25,
             "strong_trend": adx_val > 40,
+            "di_crossover": di_crossover,
         }
 
     # ── Stochastic RSI ──────────────────────────────────────────────────
@@ -276,6 +287,21 @@ class Indicators:
             "avg_volume": avg_recent,
         }
 
+    # ── EMA Slope (rate of change) ──────────────────────────────────────
+
+    @staticmethod
+    def ema_slope(prices: List[float], period: int = 21,
+                  lookback: int = 5) -> Optional[float]:
+        """Slope of EMA as pct change over last `lookback` values.
+        Positive = accelerating up, negative = accelerating down.
+        """
+        series = Indicators.ema_series(prices, period)
+        if len(series) < lookback + 1:
+            return None
+        old = series[-lookback - 1]
+        cur = series[-1]
+        return ((cur - old) / old * 100) if old > 0 else 0.0
+
     # ── Composite indicator set ─────────────────────────────────────────
 
     @staticmethod
@@ -300,6 +326,10 @@ class Indicators:
         result["sma_7"] = Indicators.sma(close_prices, 7)
         result["sma_21"] = Indicators.sma(close_prices, 21)
         result["sma_50"] = Indicators.sma(close_prices, 50)
+
+        # EMA slopes (trend velocity)
+        result["ema21_slope"] = Indicators.ema_slope(close_prices, 21, 5)
+        result["ema55_slope"] = Indicators.ema_slope(close_prices, 55, 5)
 
         avg_7 = result["sma_7"]
         if avg_7 and avg_7 > 0:

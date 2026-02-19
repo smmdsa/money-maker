@@ -1,8 +1,10 @@
 """
 Base strategy class with the shared _build_signal method.
 All concrete strategies inherit from this.
+
+Exit timing can be customized per-strategy by overriding _check_exit_signal().
 """
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from backend.services.strategies.models import Signal, StrategyConfig
 
@@ -14,6 +16,86 @@ class BaseStrategy:
                  has_long: bool = False, has_short: bool = False,
                  entry_price: float = 0.0) -> Signal:
         raise NotImplementedError
+
+    # ── Exit timing (override per strategy) ──────────────────────────────
+
+    def _check_exit_signal(
+        self,
+        has_long: bool,
+        has_short: bool,
+        long_score: int,
+        short_score: int,
+        entry_price: float,
+        current_price: float,
+        stop_loss_pct: float,
+        take_profit_pct: float,
+        confidence: float,
+        leverage: int,
+        reasoning_str: str,
+        trail_pct: float,
+    ) -> Optional[Signal]:
+        """Check if an open position should be closed.
+
+        Override in subclasses for strategy-specific exit timing.
+        Default: close on reversal (opposite score >= 3) or signal-level SL/TP.
+
+        Returns a close Signal, or None to keep the position open.
+        """
+        min_score_to_act = 3
+
+        if has_long:
+            if short_score >= min_score_to_act and short_score > long_score:
+                return Signal(
+                    "close_long", confidence, leverage,
+                    stop_loss_pct, take_profit_pct,
+                    f"CLOSE LONG \u2014 Bearish reversal: {reasoning_str}",
+                    {"long": long_score, "short": short_score},
+                    trail_pct=trail_pct,
+                )
+            if entry_price > 0:
+                pnl_pct = (current_price - entry_price) / entry_price * 100
+                if pnl_pct <= -stop_loss_pct:
+                    return Signal(
+                        "close_long", 0.95, leverage,
+                        stop_loss_pct, take_profit_pct,
+                        f"CLOSE LONG \u2014 Stop-loss hit ({pnl_pct:.1f}%)",
+                        {"pnl_pct": pnl_pct}, trail_pct=trail_pct,
+                    )
+                if pnl_pct >= take_profit_pct:
+                    return Signal(
+                        "close_long", 0.90, leverage,
+                        stop_loss_pct, take_profit_pct,
+                        f"CLOSE LONG \u2014 Take-profit hit (+{pnl_pct:.1f}%)",
+                        {"pnl_pct": pnl_pct}, trail_pct=trail_pct,
+                    )
+
+        if has_short:
+            if long_score >= min_score_to_act and long_score > short_score:
+                return Signal(
+                    "close_short", confidence, leverage,
+                    stop_loss_pct, take_profit_pct,
+                    f"CLOSE SHORT \u2014 Bullish reversal: {reasoning_str}",
+                    {"long": long_score, "short": short_score},
+                    trail_pct=trail_pct,
+                )
+            if entry_price > 0:
+                pnl_pct = (entry_price - current_price) / entry_price * 100
+                if pnl_pct <= -stop_loss_pct:
+                    return Signal(
+                        "close_short", 0.95, leverage,
+                        stop_loss_pct, take_profit_pct,
+                        f"CLOSE SHORT \u2014 Stop-loss hit ({pnl_pct:.1f}%)",
+                        {"pnl_pct": pnl_pct}, trail_pct=trail_pct,
+                    )
+                if pnl_pct >= take_profit_pct:
+                    return Signal(
+                        "close_short", 0.90, leverage,
+                        stop_loss_pct, take_profit_pct,
+                        f"CLOSE SHORT \u2014 Take-profit hit (+{pnl_pct:.1f}%)",
+                        {"pnl_pct": pnl_pct}, trail_pct=trail_pct,
+                    )
+
+        return None
 
     # ── Shared signal builder ───────────────────────────────────────────
 
@@ -44,56 +126,20 @@ class BaseStrategy:
         elif confidence < 0.5:
             leverage = max(1, cfg.default_leverage - 1)
 
+        # ── Exit check (delegated to overridable method) ─────────────
+        exit_sig = self._check_exit_signal(
+            has_long, has_short, long_score, short_score,
+            entry_price, current_price, stop_loss_pct, take_profit_pct,
+            confidence, leverage, reasoning_str, trail_pct,
+        )
+        if exit_sig:
+            return exit_sig
+
+        # ── Entry signals ────────────────────────────────────────────
         def _sig(direction, conf, lev, reason, scores):
             return Signal(direction, conf, lev, stop_loss_pct, take_profit_pct,
                           reason, scores, trail_pct=trail_pct)
 
-        # Check for position close signals first
-        if has_long:
-            if short_score >= min_score_to_act and short_score > long_score:
-                return _sig(
-                    "close_long", confidence, leverage,
-                    f"CLOSE LONG \u2014 Bearish reversal: {reasoning_str}",
-                    {"long": long_score, "short": short_score}
-                )
-            if entry_price > 0:
-                pnl_pct = (current_price - entry_price) / entry_price * 100
-                if pnl_pct <= -stop_loss_pct:
-                    return _sig(
-                        "close_long", 0.95, leverage,
-                        f"CLOSE LONG \u2014 Stop-loss hit ({pnl_pct:.1f}%)",
-                        {"pnl_pct": pnl_pct}
-                    )
-                if pnl_pct >= take_profit_pct:
-                    return _sig(
-                        "close_long", 0.90, leverage,
-                        f"CLOSE LONG \u2014 Take-profit hit (+{pnl_pct:.1f}%)",
-                        {"pnl_pct": pnl_pct}
-                    )
-
-        if has_short:
-            if long_score >= min_score_to_act and long_score > short_score:
-                return _sig(
-                    "close_short", confidence, leverage,
-                    f"CLOSE SHORT \u2014 Bullish reversal: {reasoning_str}",
-                    {"long": long_score, "short": short_score}
-                )
-            if entry_price > 0:
-                pnl_pct = (entry_price - current_price) / entry_price * 100
-                if pnl_pct <= -stop_loss_pct:
-                    return _sig(
-                        "close_short", 0.95, leverage,
-                        f"CLOSE SHORT \u2014 Stop-loss hit ({pnl_pct:.1f}%)",
-                        {"pnl_pct": pnl_pct}
-                    )
-                if pnl_pct >= take_profit_pct:
-                    return _sig(
-                        "close_short", 0.90, leverage,
-                        f"CLOSE SHORT \u2014 Take-profit hit (+{pnl_pct:.1f}%)",
-                        {"pnl_pct": pnl_pct}
-                    )
-
-        # New position signals
         if long_score >= min_score_to_act and long_score > short_score and not has_long:
             if confidence >= cfg.min_confidence:
                 return _sig(

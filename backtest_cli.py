@@ -34,6 +34,14 @@ COIN_LABELS = {
     "polkadot": "DOT", "dogecoin": "DOGE",
 }
 
+# Reverse map: accept short names like BTC, ETH on the CLI
+_SHORT_TO_COIN = {v.lower(): k for k, v in COIN_LABELS.items()}
+
+
+def _normalize_coin(raw: str) -> str:
+    """Accept 'BTC', 'btc', 'bitcoin' → 'bitcoin'."""
+    return _SHORT_TO_COIN.get(raw.lower(), raw.lower())
+
 STRATEGY_NAMES = {
     "scalper": "Scalper Pro 1h",
     "scalper_1m": "Scalper Pro 1m",
@@ -256,7 +264,7 @@ Ejemplos:
     base_url = args.url
     trailing_enabled = not args.no_trailing
     strategies = ALL_STRATEGIES if "all" in args.strategies else args.strategies
-    coins = ALL_COINS if "all" in args.coins else args.coins
+    coins = ALL_COINS if "all" in [c.lower() for c in args.coins] else [_normalize_coin(c) for c in args.coins]
     periods = args.periods
 
     # Modo comparativa
