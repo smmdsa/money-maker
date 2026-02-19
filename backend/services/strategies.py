@@ -84,14 +84,15 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     "scalper": StrategyConfig(
         key="scalper",
         name="Scalper Pro",
-        description="Many small wins with tight stops. Uses quick RSI + BB signals. "
-                    "High frequency, low holding time. Works in any market.",
+        description="Trend-following pullback scalping. Enters pullbacks within "
+                    "short-term trends using EMA alignment + RSI + BB confluence. "
+                    "ATR-adaptive stops. Profits in any market.",
         style="scalping",
         default_leverage=5,
         max_leverage=10,
         max_positions=5,
-        risk_per_trade_pct=0.5,
-        min_confidence=0.45,
+        risk_per_trade_pct=4.0,
+        min_confidence=0.50,
     ),
     "grid_trader": StrategyConfig(
         key="grid_trader",
@@ -420,6 +421,7 @@ class Indicators:
         # SMA
         result["sma_7"] = Indicators.sma(close_prices, 7)
         result["sma_21"] = Indicators.sma(close_prices, 21)
+        result["sma_50"] = Indicators.sma(close_prices, 50)
 
         # Momentum
         avg_7 = result["sma_7"]
@@ -706,8 +708,14 @@ class StrategyEngine:
                  has_long: bool, has_short: bool,
                  entry_price: float) -> Signal:
         """
-        Market-maker style scalping.
-        Quick entries on RSI + BB with tight stops and fast take-profits.
+        Professional trend-following scalper.
+
+        Philosophy:
+        - Trade WITH the short-term trend (EMA9 vs EMA21)
+        - Enter on pullbacks within the trend (RSI dips/bounces)
+        - Require BB confirmation for timing
+        - Use ATR-adaptive stops with 2:1+ R:R
+        - Exit on counter-trend signals or when target hit
         """
         reasons = []
         long_score = 0
@@ -718,41 +726,135 @@ class StrategyEngine:
         bb = ind.get("bb")
         stoch = ind.get("stoch_rsi")
         mom = ind.get("momentum", 0)
+        ema9 = ind.get("ema_9")
+        ema21 = ind.get("ema_21")
+        ema55 = ind.get("ema_55")
+        atr_pct = ind.get("atr_pct") or 2.0
+        macd = ind.get("macd")
+        adx = ind.get("adx")
+        vol = ind.get("volume")
 
-        # RSI quick signals (less extreme thresholds for scalping)
-        if rsi is not None:
-            if rsi < 35:
-                long_score += 2
-                reasons.append(f"RSI dip ({rsi:.0f}) — scalp long")
-            elif rsi > 65:
-                short_score += 2
-                reasons.append(f"RSI spike ({rsi:.0f}) — scalp short")
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 1: Short-term Trend (EMA alignment)
+        #   This is the FILTER — we only trade in direction of trend
+        # ═══════════════════════════════════════════════════════════════
+        trend_up = False
+        trend_down = False
 
-        # BB position for scalping
-        if bb:
-            if bb["pct_b"] < 0.2:
-                long_score += 2
-                reasons.append("Price near lower BB — bounce expected")
-            elif bb["pct_b"] > 0.8:
-                short_score += 2
-                reasons.append("Price near upper BB — pullback expected")
-
-        # Stochastic RSI for timing
-        if stoch:
-            if stoch["oversold"] and stoch["k"] < stoch["d"]:
+        if ema9 and ema21:
+            if ema9 > ema21:
+                trend_up = True
                 long_score += 1
-            elif stoch["overbought"] and stoch["k"] > stoch["d"]:
+            else:
+                trend_down = True
                 short_score += 1
 
-        # Small momentum confirmation
-        if 0.5 < mom < 3:
-            long_score += 1
-        elif -3 < mom < -0.5:
-            short_score += 1
+            # Stronger trend: EMA9 > EMA21 > EMA55
+            if ema55:
+                if ema9 > ema21 > ema55:
+                    long_score += 1
+                    reasons.append("EMA alignment bullish (9>21>55)")
+                elif ema9 < ema21 < ema55:
+                    short_score += 1
+                    reasons.append("EMA alignment bearish (9<21<55)")
 
-        # Scalper uses tight stops
-        sl = 1.5
-        tp = 2.0
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 2: Pullback Entry (RSI in trend direction)
+        #   Buy when RSI dips in uptrend; Short when RSI bounces in downtrend
+        # ═══════════════════════════════════════════════════════════════
+        if rsi is not None:
+            # IN UPTREND: RSI pullback to 35-48 is a buying opportunity
+            if trend_up and 30 <= rsi <= 48:
+                long_score += 2
+                reasons.append(f"Uptrend pullback: RSI {rsi:.0f}")
+            # IN DOWNTREND: RSI bounce to 52-70 is a shorting opportunity
+            elif trend_down and 52 <= rsi <= 70:
+                short_score += 2
+                reasons.append(f"Downtrend bounce: RSI {rsi:.0f}")
+            # Extreme oversold in ANY market = long opportunity
+            elif rsi < 25:
+                long_score += 2
+                reasons.append(f"Extreme oversold: RSI {rsi:.0f}")
+            # Extreme overbought in ANY market = short opportunity
+            elif rsi > 75:
+                short_score += 2
+                reasons.append(f"Extreme overbought: RSI {rsi:.0f}")
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 3: Bollinger Band position (entry timing)
+        # ═══════════════════════════════════════════════════════════════
+        if bb:
+            # In uptrend: price near lower band = pullback to support
+            if trend_up and bb["pct_b"] < 0.30:
+                long_score += 1
+                reasons.append(f"Price near lower BB ({bb['pct_b']:.2f})")
+            # In downtrend: price near upper band = bounce to resistance
+            elif trend_down and bb["pct_b"] > 0.70:
+                short_score += 1
+                reasons.append(f"Price near upper BB ({bb['pct_b']:.2f})")
+            # Extreme positions regardless of trend
+            if bb["pct_b"] < 0.05:
+                long_score += 1
+                reasons.append("BB extreme low")
+            elif bb["pct_b"] > 0.95:
+                short_score += 1
+                reasons.append("BB extreme high")
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 4: MACD Momentum Confirmation
+        # ═══════════════════════════════════════════════════════════════
+        if macd:
+            hist = macd.get("histogram", 0)
+            crossover = macd.get("crossover", "none")
+            # MACD crossover is a strong signal
+            if crossover == "bullish":
+                long_score += 2
+                reasons.append("MACD bullish crossover")
+            elif crossover == "bearish":
+                short_score += 2
+                reasons.append("MACD bearish crossover")
+            # Histogram direction confirms momentum
+            elif hist > 0 and long_score > short_score:
+                long_score += 1
+            elif hist < 0 and short_score > long_score:
+                short_score += 1
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 5: Stochastic RSI crossover
+        # ═══════════════════════════════════════════════════════════════
+        if stoch:
+            # Stoch RSI cross up from oversold = strong long trigger
+            if stoch["k"] > stoch["d"] and stoch["oversold"]:
+                long_score += 1
+                reasons.append("StochRSI cross up from oversold")
+            elif stoch["k"] < stoch["d"] and stoch["overbought"]:
+                short_score += 1
+                reasons.append("StochRSI cross down from overbought")
+
+        # ═══════════════════════════════════════════════════════════════
+        # LAYER 6: Volume confirmation
+        # ═══════════════════════════════════════════════════════════════
+        if vol and vol.get("increasing"):
+            if long_score > short_score:
+                long_score += 1
+                reasons.append("Volume increasing")
+            elif short_score > long_score:
+                short_score += 1
+                reasons.append("Volume increasing")
+
+        # ═══════════════════════════════════════════════════════════════
+        # COUNTER-TREND PENALTY: Reduce score for fighting the trend
+        # ═══════════════════════════════════════════════════════════════
+        if trend_up and short_score > long_score:
+            short_score = max(0, short_score - 2)
+        if trend_down and long_score > short_score:
+            long_score = max(0, long_score - 2)
+
+        # ═══════════════════════════════════════════════════════════════
+        # STOPS: ATR-adaptive with minimum 3:1 R:R
+        # ═══════════════════════════════════════════════════════════════
+        sl = max(atr_pct * 1.0, 0.6)
+        tp = max(atr_pct * 3.0, sl * 3.0)
 
         return self._build_signal(
             long_score, short_score, reasons, cfg,
@@ -1120,8 +1222,9 @@ def calculate_position_size(
     # Cap at 25% of balance per position
     margin = min(margin, balance * 0.25)
 
-    # Minimum $10 position
-    if margin < 10:
+    # Minimum: 1% of balance or $1 (whichever is larger)
+    min_margin = max(balance * 0.01, 1.0)
+    if margin < min_margin:
         return 0.0
 
     return round(margin, 2)

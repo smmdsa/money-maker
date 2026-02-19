@@ -154,11 +154,18 @@ def _fetch_klines(coin: str, interval: str, limit: int) -> List[Dict]:
     return all_klines
 
 
-def _get_kline_config(period_days: int) -> tuple:
+def _get_kline_config(period_days: int, strategy_key: str = "") -> tuple:
     """Choose interval and total candles needed for backtesting.
-    We use 4h candles for most periods (good balance of resolution & quantity).
+    Scalper strategies use 1h for max resolution (up to 180d).
+    Other strategies use 4h for medium periods, 1d for long.
     """
+    style = STRATEGIES.get(strategy_key, None)
+    is_fast = style and style.style in ("scalping",)
+
     if period_days <= 7:
+        return "1h", period_days * 24
+    elif is_fast and period_days <= 180:
+        # Scalper needs fine-grained candles to catch quick RSI/BB moves
         return "1h", period_days * 24
     elif period_days <= 90:
         return "4h", period_days * 6
@@ -179,6 +186,8 @@ class _Position:
     stop_loss: float
     take_profit: float
     liquidation: float
+    initial_sl: float = 0.0    # original SL for reference
+    best_price: float = 0.0    # best price seen (for trailing stop)
     opened_at: str = ""
 
 
@@ -209,7 +218,7 @@ class Backtester:
         leverage = min(leverage, cfg.max_leverage)
 
         # --- Fetch historical klines ---
-        interval, num_candles = _get_kline_config(period_days)
+        interval, num_candles = _get_kline_config(period_days, strategy_key)
         # We need extra candles for indicator warm-up (55 candles for EMA-55)
         warmup = 60
         klines = _fetch_klines(coin, interval, num_candles + warmup)
@@ -278,20 +287,29 @@ class Backtester:
                         balance -= position.margin
 
             elif position and signal.direction in ("close_long", "close_short"):
-                # Strategy wants to close
-                pnl = self._calc_pnl(position, close)
-                cash_back = max(position.margin + pnl, 0)
-                balance += cash_back
-                trades.append(BacktestTrade(
-                    trade_type=f"close_{position.direction}",
-                    timestamp=ts, price=close,
-                    amount=position.amount, margin=position.margin,
-                    leverage=position.leverage,
-                    total_value=position.amount * close,
-                    profit_loss=pnl,
-                    reason=signal.reasoning,
-                ))
-                position = None
+                # Only honour signal-based close for non-scalper strategies
+                # Scalper relies purely on mechanical SL/TP exits
+                if strategy_key == "scalper":
+                    pass  # ignore signal closes for scalper
+                else:
+                    curr_pnl = self._calc_pnl(position, close)
+                    should_close = (
+                        signal.confidence >= 0.55
+                        or curr_pnl > 0
+                    )
+                    if should_close:
+                        cash_back = max(position.margin + curr_pnl, 0)
+                        balance += cash_back
+                        trades.append(BacktestTrade(
+                            trade_type=f"close_{position.direction}",
+                            timestamp=ts, price=close,
+                            amount=position.amount, margin=position.margin,
+                            leverage=position.leverage,
+                            total_value=position.amount * close,
+                            profit_loss=curr_pnl,
+                            reason=signal.reasoning,
+                        ))
+                        position = None
 
             # --- Record equity ---
             equity = balance
@@ -453,6 +471,8 @@ class Backtester:
             stop_loss=sl,
             take_profit=tp,
             liquidation=liq,
+            initial_sl=sl,
+            best_price=price,
             opened_at=ts,
         )
 
@@ -462,16 +482,18 @@ class Backtester:
         balance: float, trades: List[BacktestTrade],
     ) -> Optional[float]:
         """Check if position should be closed by SL/TP/liquidation.
+        Simple fixed SL/TP — no trailing stop.
         Returns cash returned to balance if closed, else None.
         """
         exit_price = None
         reason = ""
 
+        # ── Check exit conditions (SL/TP/Liquidation only) ──
         if pos.direction == "long":
             if low <= pos.liquidation:
                 exit_price = pos.liquidation
                 reason = "💀 Liquidated"
-                pnl = -pos.margin  # total loss
+                pnl = -pos.margin
             elif low <= pos.stop_loss:
                 exit_price = pos.stop_loss
                 reason = "🛑 Stop-loss hit"
