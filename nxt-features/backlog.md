@@ -83,6 +83,9 @@
 | 🔗 News clickables | Títulos de noticias son links `<a>` que abren en nueva pestaña | 2026-02-18 |
 | 🔠 Crypto names uppercase | Nombres de criptomonedas en mayúsculas | 2026-02-18 |
 | 💵 Balance mínimo $50 | Reducido de $100 a $50 para accesibilidad | 2026-02-18 |
+| ⚡ Refresh 15s | Precios cada 15s (Binance lo permite), news y agents cada 60s | 2026-02-19 |
+| 💰 Smart price formatting | Decimales variables según magnitud del precio (fmtPrice) | 2026-02-19 |
+| 🔍 Trade → Decision modal | Click en un trade abre modal con el AI Decision completo que lo originó | 2026-02-19 |
 
 ---
 
@@ -154,28 +157,104 @@
 
 ## Próximas Features (priorizadas)
 
-### 3. 🤖 LLM para Análisis de Noticias + Razonamiento del Agente
+### 3. 🤖 LLM para Análisis de Noticias + Razonamiento del Agente — COMPLETADO
 
-**Impacto**: Alto  
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
 **Área**: Inteligencia / IA  
-**Dependencias**: API key externa (OpenAI, Anthropic, o modelo local)
+**Modelo**: Gemini 2.0 Flash (free tier: 15 RPM, 1M tokens/min)
 
-Integrar un LLM económico para:
+**Implementación entregada:**
 
-- **Análisis de sentimiento profundo**: Leer la noticia completa, no solo keywords del título
-- **Razonamiento en lenguaje natural**: Explicar cada decisión en un texto comprensible
-  - Ejemplo: *"Vendí SOL porque Abu Dhabi redujo su exposición a altcoins según CoinDesk, combinado con RSI 72 (sobrecompra) y MACD bearish"*
-- **Resumen diario**: Generar un briefing matutino del mercado
+- **`backend/services/llm_service.py`** (~270 líneas): Servicio modular con `LLMService` class
+- **Análisis por trade**: Cuando el strategy engine genera una señal (LONG/SHORT), el LLM recibe indicadores técnicos + noticias recientes y produce:
+  - **Razonamiento en lenguaje natural** (explicación comprensible de la decisión)
+  - **Ajuste de confianza** (±15% máximo, basado en análisis holístico)
+  - **Notas de riesgo**, resumen de noticias, contexto de mercado
+- **Rate limiting inteligente**: 4.5s mínimo entre llamadas (≤15 RPM)
+- **Auto-disable**: 3 fallos consecutivos → cooldown de 5 minutos → reintenta automáticamente
+- **JSON estructurado**: `response_mime_type="application/json"`, temperature=0.3
+- **Integración con trading agent**: `_get_llm_analysis()` enriquece cada trade, datos guardados en DB
+- **Frontend**: Bloque "🧠 AI Analysis" con badge de ajuste de confianza (verde/rojo/neutral)
+- **Health endpoint**: `llm_service: {status: "ok", model: "gemini-2.0-flash"}`
 
-**Opciones de modelo** (de menor a mayor costo):
-| Modelo | Costo aprox. | Ventaja |
-|--------|-------------|---------|
-| Llama 3 (local) | $0 | Sin costo, privacidad total |
-| GPT-4o-mini | ~$0.15/1M tokens | Muy barato, rápido |
-| Claude Haiku | ~$0.25/1M tokens | Buen análisis |
-| Gemini Flash | Gratis (tier free) | Sin costo inicial |
+**Archivos creados / modificados:**
 
-**Implementación**: Servicio modular `llm_service.py` con interfaz agnóstica del proveedor.
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/llm_service.py` | **NUEVO** — LLMService, LLMAnalysis dataclass, rate limiting, auto-disable |
+| `backend/services/trading_agent.py` | LLM integration (_get_llm_analysis, confidence adjustment) |
+| `backend/models/database.py` | Campos `llm_reasoning`, `llm_sentiment_adj` en Decision |
+| `main.py` | LLMService init, health check, decisions API update |
+| `static/index.html` | LLM reasoning CSS/display blocks |
+| `requirements.txt` | `google-generativeai>=0.4.0` |
+
+---
+
+### 3b. 📡 Migración a Binance Futures API — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Market Data / Infraestructura
+
+**Problema**: Estábamos usando `api.binance.com/api/v3` (SPOT) para obtener precios, pero nuestra app simula trading de futuros con apalancamiento. Los precios de futuros difieren del spot.
+
+**Solución implementada:**
+
+- **Endpoint primario**: `fapi.binance.com/fapi/v1` (Binance Futures USDT-M)
+- **Mark Price** como precio principal: Es el precio que Binance usa para calcular liquidaciones, más relevante para simulación de futuros
+- **Funding Rate**: Tasa de financiamiento expuesta en API y mostrada en dashboard — indica sesgo del mercado (positivo = longs pagan, negativo = shorts pagan)
+- **Fallback a Spot**: Si la API de futuros falla, se usa automáticamente `api.binance.com/api/v3`
+- **Klines de futuros**: OHLC data también viene del mercado de futuros
+- **Frontend**: Cada coin card muestra funding rate con color (verde = positivo, rojo = negativo)
+- **Health**: `binance_futures: ok`, provider: `"Binance Futures"`
+
+**Endpoints utilizados:**
+
+| Endpoint | Datos |
+|----------|-------|
+| `/fapi/v1/premiumIndex` | Mark Price, Funding Rate, Next Funding Time |
+| `/fapi/v1/ticker/24hr` | Last Price, Volume, 24h Change, High/Low |
+| `/fapi/v1/klines` | OHLC candlestick data (futuros) |
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/market_data.py` | `FUTURES_URL`, `SPOT_URL`, `get_prices()` usa mark price, `get_market_data()` incluye funding rate, fallbacks a spot |
+| `backend/services/trading_agent.py` | `funding_rate` y `mark_price` añadidos a indicators |
+| `static/index.html` | Funding rate display en price cards, provider badge update |
+
+---
+
+### 3c. 🔍 Trade → Decision Tracking (Modal) — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: UX / Traceability
+
+**Problema**: Las decisiones de AI se perdían en el log al pasar el tiempo, sin forma de saber qué análisis originó cada trade.
+
+**Solución implementada:**
+
+- **`decision_id` FK en Trade**: Cada trade queda vinculado a la decisión que lo originó
+- **API `GET /api/decisions/{id}`**: Endpoint para obtener detalles de una decisión individual
+- **Trades clickeables**: En "Recent Trades", los trades con decisión asociada son clickeables (borde cyan al hover + hint "🔍 Click to see AI decision")
+- **Modal de detalle**: Al hacer click se abre un modal oscuro con:
+  - Header con moneda, dirección (LONG/SHORT), estrategia
+  - Strategy Reasoning con confianza
+  - Technical Indicators en grid
+  - News Considered (si aplica)
+  - 🧠 Gemini AI Analysis completa
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/models/database.py` | `decision_id` FK en Trade, relationship |
+| `backend/services/trading_agent.py` | `_log_decision()` retorna ID, linkeo en `_open_position`/`_close_position` |
+| `main.py` | `decision_id` en trades response, `GET /api/decisions/{id}` |
+| `static/index.html` | Modal CSS/HTML/JS, trades clickeables |
 
 ---
 
@@ -279,13 +358,15 @@ Bot de Telegram y/o email para notificar:
 ## Orden de Implementación
 
 ```
-1. Gráficos Candlestick ──→ ✅ COMPLETADO (2026-02-18)
+1.  Gráficos Candlestick ──→ ✅ COMPLETADO (2026-02-18)
 1b. Fix Rate-Limit Blocking ──→ ✅ COMPLETADO (2026-02-18)
 1c. Binance Primary Provider ──→ ✅ COMPLETADO (2026-02-18)
-2. Estrategias Elite + Futuros ──→ ✅ COMPLETADO (2026-02-19)
-3. LLM Análisis ──→ requiere API key externa
-4. Backtesting ──→ depende de que estrategias estén definidas ✅
-5. Notificaciones ──→ add-on independiente, se puede hacer en paralelo con 3-4
+2.  Estrategias Elite + Futuros ──→ ✅ COMPLETADO (2026-02-19)
+3.  LLM Análisis (Gemini 2.0 Flash) ──→ ✅ COMPLETADO (2026-02-19)
+3b. Migración a Binance Futures API ──→ ✅ COMPLETADO (2026-02-19)
+3c. Trade → Decision Tracking ──→ ✅ COMPLETADO (2026-02-19)
+4.  Backtesting ──→ next (dependencia: estrategias ✅)
+5.  Notificaciones ──→ add-on independiente
 ```
 
 ---
@@ -306,17 +387,18 @@ Bot de Telegram y/o email para notificar:
 | Scheduler | APScheduler | Ciclo de trading cada 60s |
 | Async | asyncio.to_thread() | Trading cycle nunca bloquea el event loop |
 
-### Estructura de archivos (~5,900+ líneas)
+### Estructura de archivos (~7,200+ líneas)
 
 | Archivo | Líneas | Responsabilidad |
-|---------|--------|-----------------|
-| `main.py` | 524 | Endpoints, scheduler, WebSocket |
+|---------|--------|----------------|
+| `main.py` | 540+ | Endpoints, scheduler, WebSocket |
 | `backend/services/strategies.py` | 1140 | Indicadores técnicos, 6 estrategias, position sizing |
-| `backend/services/market_data.py` | 652 | RateLimiter, BinanceProvider, MarketDataService |
-| `backend/services/trading_agent.py` | 486 | Futures lifecycle, strategy engine integration |
+| `backend/services/market_data.py` | 780+ | RateLimiter, BinanceProvider (Futures+Spot), MarketDataService |
+| `backend/services/trading_agent.py` | 570+ | Futures lifecycle, strategy engine, LLM integration |
+| `backend/services/llm_service.py` | 270 | Gemini 2.0 Flash, LLMAnalysis, rate limiting |
 | `backend/services/news_service.py` | 313 | RSS feeds, sentimiento por keywords |
-| `backend/models/database.py` | ~110 | 6 modelos SQLAlchemy (con campos futures) |
-| `static/index.html` | 1100+ | Dashboard completo con strategy picker + futures UI |
+| `backend/models/database.py` | 130+ | 6 modelos SQLAlchemy (con campos futures + LLM + decision_id) |
+| `static/index.html` | 1450+ | Dashboard con strategy picker, futures UI, LLM blocks, decision modal |
 | `static/charts.js` | 359 | Módulo de charts TradingView |
 
 ---
@@ -326,6 +408,8 @@ Bot de Telegram y/o email para notificar:
 - Todas las features deben ser compatibles con balances pequeños ($50-$100)
 - Priorizar APIs gratuitas o de muy bajo costo
 - Mantener la app funcional en cada paso (no romper el MVP)
-- **Binance es el proveedor primario** — CoinGecko solo se usa como fallback
+- **Binance Futures es el proveedor primario** — Spot y CoinGecko solo se usan como fallback
+- **Mark Price** como precio principal (usado para liquidaciones reales en Binance)
+- **Funding Rate** disponible en dashboard y en indicadores del trading agent
 - **No bloquear el event loop** — toda I/O síncrona va en `asyncio.to_thread()`
 - DoD: features completas funcionales, code review al finalizar (no unit tests)

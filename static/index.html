@@ -244,6 +244,17 @@
             font-size: 0.85em;
             margin-top: 5px;
         }
+
+        .funding-rate {
+            font-size: 0.75em;
+            margin-top: 3px;
+            color: #999;
+        }
+        .funding-rate .fr-value {
+            font-weight: 600;
+        }
+        .funding-rate .fr-positive { color: #4caf50; }
+        .funding-rate .fr-negative { color: #ff5252; }
         
         .modal {
             display: none;
@@ -1098,13 +1109,22 @@
                 const badge = document.getElementById('dataSourceBadge');
                 if (badge) {
                     badge.textContent = `via ${provider}`;
-                    badge.style.background = provider === 'Binance' ? '#fff3e0' : '#e3f2fd';
-                    badge.style.color = provider === 'Binance' ? '#e65100' : '#1565c0';
+                    const isBinance = provider.includes('Binance');
+                    badge.style.background = isBinance ? '#fff3e0' : '#e3f2fd';
+                    badge.style.color = isBinance ? '#e65100' : '#1565c0';
                 }
                 
                 const marketPrices = document.getElementById('marketPrices');
                 
-                marketPrices.innerHTML = prices.map(coin => `
+                marketPrices.innerHTML = prices.map(coin => {
+                    // Format funding rate if available
+                    let fundingHtml = '';
+                    if (coin.funding_rate != null) {
+                        const fr = coin.funding_rate * 100;
+                        const frClass = fr > 0 ? 'fr-positive' : fr < 0 ? 'fr-negative' : '';
+                        fundingHtml = `<div class="funding-rate">FR: <span class="fr-value ${frClass}">${fr >= 0 ? '+' : ''}${fr.toFixed(4)}%</span></div>`;
+                    }
+                    return `
                     <div class="price-card">
                         <div class="coin-name">${coin.symbol}</div>
                         <div class="coin-price">$${coin.current_price ? fmtPrice(coin.current_price) : 'N/A'}</div>
@@ -1113,8 +1133,9 @@
                                 ${coin.price_change_24h >= 0 ? '↑' : '↓'} ${Math.abs(coin.price_change_24h).toFixed(2)}%
                             </div>
                         ` : ''}
+                        ${fundingHtml}
                     </div>
-                `).join('');
+                `}).join('');
             } catch (error) {
                 console.error('Error loading market prices:', error);
             }

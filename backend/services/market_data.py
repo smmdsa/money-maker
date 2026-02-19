@@ -59,12 +59,16 @@ class CacheEntry:
         return datetime.now() < self.expires_at
 
 
-# ── Binance provider (fallback) ───────────────────────────────────────
+# ── Binance provider (primary) ────────────────────────────────────────
 
 class BinanceProvider:
-    """Fallback API provider using Binance public API — 1200 req/min, no key."""
+    """Primary API provider using Binance Futures (USDT-M) public API — no key required.
+    Uses fapi.binance.com for futures prices, mark prices, funding rates, and klines.
+    Falls back to spot API (api.binance.com) if futures endpoint fails.
+    """
 
-    BASE_URL = "https://api.binance.com/api/v3"
+    FUTURES_URL = "https://fapi.binance.com/fapi/v1"
+    SPOT_URL = "https://api.binance.com/api/v3"
 
     # CoinGecko ID → Binance symbol mapping
     SYMBOL_MAP = {
@@ -106,14 +110,39 @@ class BinanceProvider:
         })
 
     def get_prices(self, coins: List[str]) -> Dict[str, float]:
-        """Fetch current prices from Binance."""
+        """Fetch current prices from Binance Futures (mark price)."""
         try:
             symbols = [self.SYMBOL_MAP[c] for c in coins if c in self.SYMBOL_MAP]
             if not symbols:
                 return {}
 
+            # Try futures mark price first (used for liquidation calculations)
             resp = self._session.get(
-                f"{self.BASE_URL}/ticker/price",
+                f"{self.FUTURES_URL}/premiumIndex",
+                timeout=10
+            )
+            resp.raise_for_status()
+
+            prices = {}
+            ticker_map = {t["symbol"]: float(t["markPrice"]) for t in resp.json()}
+            for coin in coins:
+                sym = self.SYMBOL_MAP.get(coin)
+                if sym and sym in ticker_map:
+                    prices[coin] = ticker_map[sym]
+
+            if prices:
+                logger.info(f"Binance Futures: got {len(prices)} mark prices")
+            return prices
+
+        except Exception as e:
+            logger.warning(f"Binance Futures prices failed, trying spot: {e}")
+            return self._get_spot_prices(coins)
+
+    def _get_spot_prices(self, coins: List[str]) -> Dict[str, float]:
+        """Fallback: fetch from spot API."""
+        try:
+            resp = self._session.get(
+                f"{self.SPOT_URL}/ticker/price",
                 timeout=10
             )
             resp.raise_for_status()
@@ -126,26 +155,87 @@ class BinanceProvider:
                     prices[coin] = ticker_map[sym]
 
             if prices:
-                logger.info(f"Binance fallback: got {len(prices)} prices")
+                logger.info(f"Binance Spot fallback: got {len(prices)} prices")
             return prices
-
         except Exception as e:
-            logger.warning(f"Binance prices failed: {e}")
+            logger.warning(f"Binance Spot prices also failed: {e}")
             return {}
 
     def get_market_data(self, coins: List[str]) -> List[Dict]:
-        """Fetch market data from Binance 24hr ticker."""
+        """Fetch market data from Binance Futures 24hr ticker + mark price + funding rate."""
         try:
             symbols = [self.SYMBOL_MAP[c] for c in coins if c in self.SYMBOL_MAP]
             if not symbols:
                 return []
 
+            # Futures 24hr ticker
             resp = self._session.get(
-                f"{self.BASE_URL}/ticker/24hr",
+                f"{self.FUTURES_URL}/ticker/24hr",
                 timeout=10
             )
             resp.raise_for_status()
+            ticker_map = {t["symbol"]: t for t in resp.json()}
 
+            # Mark price + funding rate (premiumIndex)
+            mark_resp = self._session.get(
+                f"{self.FUTURES_URL}/premiumIndex",
+                timeout=10
+            )
+            mark_resp.raise_for_status()
+            mark_map = {m["symbol"]: m for m in mark_resp.json()}
+
+            result = []
+            for coin in coins:
+                sym = self.SYMBOL_MAP.get(coin)
+                if not sym or sym not in ticker_map:
+                    continue
+                t = ticker_map[sym]
+                m = mark_map.get(sym, {})
+                try:
+                    mark_price = float(m.get("markPrice", 0))
+                    last_price = float(t.get("lastPrice", 0))
+                    funding_rate = float(m.get("lastFundingRate", 0))
+                    next_funding_time = int(m.get("nextFundingTime", 0))
+
+                    result.append({
+                        "id": coin,
+                        "symbol": sym.replace("USDT", ""),
+                        "name": self.NAMES.get(coin, coin.capitalize()),
+                        "current_price": mark_price or last_price,
+                        "last_price": last_price,
+                        "mark_price": mark_price,
+                        "market_cap": None,
+                        "volume_24h": float(t.get("quoteVolume", 0)),
+                        "price_change_24h": float(t.get("priceChangePercent", 0)),
+                        "price_change_7d": None,
+                        "high_24h": float(t.get("highPrice", 0)),
+                        "low_24h": float(t.get("lowPrice", 0)),
+                        "circulating_supply": None,
+                        "total_supply": None,
+                        "image": None,
+                        "funding_rate": funding_rate,
+                        "next_funding_time": next_funding_time,
+                        "market_type": "futures",
+                    })
+                except (ValueError, TypeError):
+                    continue
+
+            if result:
+                logger.info(f"Binance Futures: got market data for {len(result)} coins")
+            return result
+
+        except Exception as e:
+            logger.warning(f"Binance Futures market data failed, trying spot: {e}")
+            return self._get_spot_market_data(coins)
+
+    def _get_spot_market_data(self, coins: List[str]) -> List[Dict]:
+        """Fallback: fetch market data from spot 24hr ticker."""
+        try:
+            resp = self._session.get(
+                f"{self.SPOT_URL}/ticker/24hr",
+                timeout=10
+            )
+            resp.raise_for_status()
             ticker_map = {t["symbol"]: t for t in resp.json()}
 
             result = []
@@ -160,7 +250,7 @@ class BinanceProvider:
                         "symbol": sym.replace("USDT", ""),
                         "name": self.NAMES.get(coin, coin.capitalize()),
                         "current_price": float(t.get("lastPrice", 0)),
-                        "market_cap": None,  # Binance doesn't provide market cap
+                        "market_cap": None,
                         "volume_24h": float(t.get("quoteVolume", 0)),
                         "price_change_24h": float(t.get("priceChangePercent", 0)),
                         "price_change_7d": None,
@@ -169,20 +259,17 @@ class BinanceProvider:
                         "circulating_supply": None,
                         "total_supply": None,
                         "image": None,
+                        "market_type": "spot",
                     })
                 except (ValueError, TypeError):
                     continue
-
-            if result:
-                logger.info(f"Binance fallback: got market data for {len(result)} coins")
             return result
-
         except Exception as e:
-            logger.warning(f"Binance market data failed: {e}")
+            logger.warning(f"Binance Spot market data also failed: {e}")
             return []
 
     def get_historical_prices(self, coin: str, days: int = 30) -> List[Dict]:
-        """Fetch historical prices from Binance klines."""
+        """Fetch historical prices from Binance Futures klines."""
         try:
             sym = self.SYMBOL_MAP.get(coin)
             if not sym:
@@ -192,7 +279,7 @@ class BinanceProvider:
             interval, limit = self.INTERVAL_MAP.get(days, ("1d", min(days, 365)))
 
             resp = self._session.get(
-                f"{self.BASE_URL}/klines",
+                f"{self.FUTURES_URL}/klines",
                 params={"symbol": sym, "interval": interval, "limit": limit},
                 timeout=15
             )
@@ -206,15 +293,33 @@ class BinanceProvider:
                 })
 
             if prices:
-                logger.info(f"Binance fallback: got {len(prices)} historical prices for {coin}")
+                logger.info(f"Binance Futures: got {len(prices)} historical prices for {coin}")
             return prices
 
         except Exception as e:
-            logger.warning(f"Binance historical data failed for {coin}: {e}")
+            logger.warning(f"Binance Futures historical data failed for {coin}, trying spot: {e}")
+            return self._get_spot_historical(coin, days)
+
+    def _get_spot_historical(self, coin: str, days: int = 30) -> List[Dict]:
+        """Fallback: fetch from spot klines."""
+        try:
+            sym = self.SYMBOL_MAP.get(coin)
+            if not sym:
+                return []
+            interval, limit = self.INTERVAL_MAP.get(days, ("1d", min(days, 365)))
+            resp = self._session.get(
+                f"{self.SPOT_URL}/klines",
+                params={"symbol": sym, "interval": interval, "limit": limit},
+                timeout=15
+            )
+            resp.raise_for_status()
+            return [{"timestamp": datetime.fromtimestamp(k[0] / 1000), "price": float(k[4])} for k in resp.json()]
+        except Exception as e:
+            logger.warning(f"Binance Spot historical also failed for {coin}: {e}")
             return []
 
     def get_ohlc(self, coin: str, days: int = 14) -> List[Dict]:
-        """Fetch OHLC klines data from Binance."""
+        """Fetch OHLC klines data from Binance Futures."""
         try:
             sym = self.SYMBOL_MAP.get(coin)
             if not sym:
@@ -223,7 +328,7 @@ class BinanceProvider:
             interval, limit = self.INTERVAL_MAP.get(days, ("1d", min(days, 365)))
 
             resp = self._session.get(
-                f"{self.BASE_URL}/klines",
+                f"{self.FUTURES_URL}/klines",
                 params={"symbol": sym, "interval": interval, "limit": limit},
                 timeout=15
             )
@@ -241,11 +346,34 @@ class BinanceProvider:
                 })
 
             if ohlc:
-                logger.info(f"Binance fallback: got {len(ohlc)} OHLC candles for {coin}")
+                logger.info(f"Binance Futures: got {len(ohlc)} OHLC candles for {coin}")
             return ohlc
 
         except Exception as e:
-            logger.warning(f"Binance OHLC failed for {coin}: {e}")
+            logger.warning(f"Binance Futures OHLC failed for {coin}, trying spot: {e}")
+            return self._get_spot_ohlc(coin, days)
+
+    def _get_spot_ohlc(self, coin: str, days: int = 14) -> List[Dict]:
+        """Fallback: fetch OHLC from spot klines."""
+        try:
+            sym = self.SYMBOL_MAP.get(coin)
+            if not sym:
+                return []
+            interval, limit = self.INTERVAL_MAP.get(days, ("1d", min(days, 365)))
+            resp = self._session.get(
+                f"{self.SPOT_URL}/klines",
+                params={"symbol": sym, "interval": interval, "limit": limit},
+                timeout=15
+            )
+            resp.raise_for_status()
+            return [{
+                "timestamp": datetime.fromtimestamp(k[0] / 1000),
+                "open": float(k[1]), "high": float(k[2]),
+                "low": float(k[3]), "close": float(k[4]),
+                "volume": float(k[5])
+            } for k in resp.json()]
+        except Exception as e:
+            logger.warning(f"Binance Spot OHLC also failed for {coin}: {e}")
             return []
 
 
@@ -279,7 +407,7 @@ class MarketDataService:
         self._max_retries = 3
         self._last_known_prices: Dict[str, float] = {}
         self._coingecko_blocked_until: float = 0
-        self._current_provider: str = "Binance"
+        self._current_provider: str = "Binance Futures"
 
         # Primary provider
         self._binance = BinanceProvider()
@@ -369,10 +497,10 @@ class MarketDataService:
         if cached:
             return cached
 
-        # Primary: Binance
+        # Primary: Binance Futures
         prices = self._binance.get_prices(self.supported_coins)
         if prices:
-            self._current_provider = "Binance"
+            self._current_provider = "Binance Futures"
             for coin, price in prices.items():
                 self._last_known_prices[coin] = price
             self._set_cache("prices", prices, self.PRICES_TTL)
@@ -418,10 +546,10 @@ class MarketDataService:
         if cached:
             return cached
 
-        # Primary: Binance
+        # Primary: Binance Futures
         result = self._binance.get_market_data(self.supported_coins)
         if result:
-            self._current_provider = "Binance"
+            self._current_provider = "Binance Futures"
             self._set_cache(cache_key, result, self.MARKET_DATA_TTL)
             for entry in result:
                 if entry["current_price"]:
@@ -633,7 +761,7 @@ class MarketDataService:
 
     def health_check(self) -> Dict:
         """Check API connectivity and return status"""
-        # Quick Binance check (primary)
+        # Quick Binance Futures check (primary)
         binance_ok = bool(self._binance.get_prices(["bitcoin"]))
 
         cg_blocked = self._is_coingecko_blocked()
@@ -645,7 +773,7 @@ class MarketDataService:
 
         return {
             "status": "ok" if binance_ok or cg_ok or self._last_known_prices else "degraded",
-            "binance": "ok" if binance_ok else "down",
+            "binance_futures": "ok" if binance_ok else "down",
             "coingecko": "ok" if cg_ok else ("blocked" if cg_blocked else "down"),
             "consecutive_failures": self._consecutive_failures,
             "cache_entries": len(self._cache),

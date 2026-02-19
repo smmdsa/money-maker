@@ -268,6 +268,8 @@ class TradingAgentService:
         indicators["price_change_7d"] = market_data.get("price_change_7d", 0) or 0
         indicators["volume_24h"] = market_data.get("volume_24h", 0) or 0
         indicators["market_cap"] = market_data.get("market_cap", 0) or 0
+        indicators["funding_rate"] = market_data.get("funding_rate", 0) or 0
+        indicators["mark_price"] = market_data.get("mark_price", 0) or 0
 
         return indicators
 
