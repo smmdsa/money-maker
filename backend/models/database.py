@@ -51,6 +51,8 @@ class Portfolio(Base):
     liquidation_price = Column(Float, default=0.0)
     stop_loss_price = Column(Float, default=0.0)
     take_profit_price = Column(Float, default=0.0)
+    trailing_stop_pct = Column(Float, default=0.0)   # >0 = trail distance %; 0 = disabled
+    price_extreme = Column(Float, default=0.0)        # best price since entry (high for long, low for short)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     agent = relationship("TradingAgent", back_populates="portfolio")

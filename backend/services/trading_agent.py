@@ -116,6 +116,51 @@ class TradingAgentService:
 
     # ── Position Checks (SL / TP / Liquidation) ───────────────────────────
 
+    def _update_trailing_stops(self, pos: Portfolio, current_price: float) -> bool:
+        """Update trailing stop-loss based on price extreme.
+        Returns True if SL was moved (for logging purposes).
+        DRY: called by both _check_position (60s) and _risk_check_position (5s).
+        """
+        trail_pct = getattr(pos, 'trailing_stop_pct', 0) or 0
+        if trail_pct <= 0 or current_price <= 0:
+            return False
+
+        extreme = getattr(pos, 'price_extreme', 0) or pos.avg_buy_price
+        moved = False
+
+        if pos.position_type == "long":
+            # Update extreme (highest price seen)
+            if current_price > extreme:
+                pos.price_extreme = current_price
+                extreme = current_price
+            # Recalculate trailing SL — only moves UP
+            new_sl = extreme * (1 - trail_pct / 100)
+            if new_sl > pos.stop_loss_price:
+                logger.debug(
+                    f"Trailing SL ↑ {pos.cryptocurrency}: "
+                    f"${pos.stop_loss_price:.2f} → ${new_sl:.2f} "
+                    f"(peak ${extreme:.2f})"
+                )
+                pos.stop_loss_price = new_sl
+                moved = True
+        else:  # short
+            # Update extreme (lowest price seen)
+            if extreme == 0 or current_price < extreme:
+                pos.price_extreme = current_price
+                extreme = current_price
+            # Recalculate trailing SL — only moves DOWN
+            new_sl = extreme * (1 + trail_pct / 100)
+            if pos.stop_loss_price <= 0 or new_sl < pos.stop_loss_price:
+                logger.debug(
+                    f"Trailing SL ↓ {pos.cryptocurrency}: "
+                    f"${pos.stop_loss_price:.2f} → ${new_sl:.2f} "
+                    f"(low ${extreme:.2f})"
+                )
+                pos.stop_loss_price = new_sl
+                moved = True
+
+        return moved
+
     def _check_position(self, agent: TradingAgent, pos: Portfolio,
                         strategy_key: str, db: Session) -> Optional[Dict]:
         """Check an existing position for liquidation, stop-loss, or take-profit."""
@@ -124,6 +169,9 @@ class TradingAgentService:
             return None
 
         pos.current_price = current_price
+
+        # 0. Trailing stop update (before any checks)
+        self._update_trailing_stops(pos, current_price)
 
         # 1. Liquidation check
         if pos.leverage > 1 and pos.liquidation_price > 0:
@@ -516,6 +564,8 @@ class TradingAgentService:
             liquidation_price=liq_price,
             stop_loss_price=sl_price,
             take_profit_price=tp_price,
+            trailing_stop_pct=signal.stop_loss_pct,   # trail distance = initial SL %
+            price_extreme=current_price,               # starts at entry price
         )
         db.add(portfolio_item)
 
@@ -701,8 +751,8 @@ class TradingAgentService:
                 if result:
                     actions.append(result)
 
-        if actions:
-            db.commit()
+        # Always commit — trailing updates modify SL/price_extreme even without closes
+        db.commit()
 
         return actions
 
@@ -712,6 +762,9 @@ class TradingAgentService:
     ) -> Optional[Dict]:
         """Check a single position for SL/TP/liquidation. Ultra-lightweight."""
         strategy_key = agent.strategy or "confluence_master"
+
+        # 0. Trailing stop update (before any checks)
+        self._update_trailing_stops(pos, current_price)
 
         # 1. Liquidation
         if pos.leverage > 1 and pos.liquidation_price > 0:

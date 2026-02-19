@@ -1,13 +1,16 @@
 """
 Database connection and session management
 """
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from backend.models.database import Base
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./trading.db")
 
@@ -20,8 +23,46 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables and run lightweight migrations."""
     Base.metadata.create_all(bind=engine)
+    _run_migrations()
+
+
+def _run_migrations():
+    """Add missing columns to existing tables (safe for re-runs)."""
+    migrations = [
+        ("portfolio", "trailing_stop_pct", "REAL DEFAULT 0"),
+        ("portfolio", "price_extreme", "REAL DEFAULT 0"),
+    ]
+    with engine.connect() as conn:
+        for table, column, col_type in migrations:
+            try:
+                conn.execute(text(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+                ))
+                conn.commit()
+                logger.info(f"Migration: added {table}.{column}")
+            except Exception:
+                # Column already exists — safe to ignore
+                pass
+
+        # Backfill trailing stops for existing positions missing them
+        try:
+            result = conn.execute(text(
+                "UPDATE portfolio "
+                "SET trailing_stop_pct = CASE "
+                "  WHEN stop_loss_price > 0 AND avg_buy_price > 0 "
+                "    THEN ABS(stop_loss_price - avg_buy_price) / avg_buy_price * 100 "
+                "  ELSE 0 END, "
+                "price_extreme = avg_buy_price "
+                "WHERE (trailing_stop_pct IS NULL OR trailing_stop_pct = 0) "
+                "AND stop_loss_price > 0 AND amount > 0"
+            ))
+            conn.commit()
+            if result.rowcount > 0:
+                logger.info(f"Migration: backfilled trailing stops for {result.rowcount} positions")
+        except Exception as e:
+            logger.debug(f"Trailing backfill skipped: {e}")
 
 
 def get_db():

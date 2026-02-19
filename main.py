@@ -217,6 +217,8 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
                 "liquidation_price": item.liquidation_price,
                 "stop_loss_price": item.stop_loss_price,
                 "take_profit_price": item.take_profit_price,
+                "trailing_stop_pct": getattr(item, 'trailing_stop_pct', 0) or 0,
+                "price_extreme": getattr(item, 'price_extreme', 0) or 0,
             })
     
     total_value = agent.current_balance + portfolio_value
