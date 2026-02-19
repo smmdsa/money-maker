@@ -1,6 +1,6 @@
 # Money Maker — Feature Backlog
 
-> Última actualización: 2026-02-19
+> Última actualización: 2026-02-19 (sesión 3)
 
 ---
 
@@ -101,10 +101,14 @@
 
 | Estrategia | Estilo | Lev. Default | Lev. Max | Max Pos. | Risk/Trade | Min Conf. | Inspiración |
 |------------|--------|:------------:|:--------:|:--------:|:----------:|:---------:|-------------|
-| **Trend Rider** | Trend Following | 3x | 5x | 3 | 2.0% | 0.55 | Paul Tudor Jones |
+| **Trend Rider v2** | Trend Following | 3x | 5x | 3 | 2.5% | 0.55 | Paul Tudor Jones |
 | **Mean Reversion** | Mean Reversion | 2x | 3x | 4 | 1.5% | 0.50 | Jim Simons / RenTech |
 | **Momentum Sniper** | Momentum | 4x | 7x | 2 | 2.5% | 0.60 | Jesse Livermore |
-| **Scalper Pro** | Scalping | 5x | 10x | 5 | 0.5% | 0.45 | Market Makers |
+| **Scalper Pro 1h** | Scalping | 5x | 10x | 5 | 4.0% | 0.50 | Market Makers |
+| **Scalper Pro 1m** | Scalping | 10x | 20x | 5 | 2.0% | 0.50 | HFT |
+| **Scalper Pro 3m** | Scalping | 8x | 15x | 5 | 2.5% | 0.50 | HFT |
+| **Scalper Pro 5m** | Scalping | 7x | 12x | 5 | 3.0% | 0.50 | Daytrading |
+| **Scalper Pro 15m** | Scalping | 6x | 10x | 5 | 3.5% | 0.50 | Swing Scalping |
 | **Grid Trader** | Grid / Systematic | 2x | 3x | 8 | 1.0% | 0.40 | Quant desks |
 | **Confluence Master** | Multi-factor | 5x | 10x | 2 | 3.0% | 0.70 | Institutional |
 
@@ -258,21 +262,195 @@
 
 ---
 
-### 4. 🔙 Backtesting con Datos Históricos
+### 4. 🔙 Backtesting con Datos Históricos — COMPLETADO
 
-**Impacto**: Muy Alto  
-**Área**: Trading / Validación  
-**Dependencias**: Feature #2 (estrategias configurables)
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Trading / Validación
 
-Simular una estrategia contra datos históricos reales antes de activarla:
+**Implementación entregada:**
 
-- El usuario selecciona: estrategia, moneda(s), período (30/90/365 días)
-- El sistema ejecuta el loop de trading sobre datos históricos de CoinGecko
-- Muestra resultados: rendimiento total, max drawdown, Sharpe ratio, # trades
-- Gráfico comparativo: estrategia vs buy-and-hold
-- Guardar resultados para comparar entre estrategias
+- **`backend/services/backtester.py`** (~700 líneas): Motor de backtesting completo
+  - Replay de klines históricas de Binance a través del StrategyEngine
+  - Simulación completa de futuros: LONG/SHORT, leverage, margin, liquidación, SL/TP
+  - Indicadores computados con sliding window de 200 candles (O(n) vs O(n²))
+  - Warmup de 100 candles antes de generar señales
+  - Métricas: total return, max drawdown, Sharpe ratio, profit factor, win rate, R:R promedio
+  - Equity curve con estrategia vs Buy & Hold
+  
+- **`POST /api/backtest`**: Endpoint con `asyncio.to_thread()` para no bloquear
+- **Frontend**: Sección separada "Backtesting" con nav bar (Dashboard | Backtesting)
+  - Selector de estrategia, moneda, período, balance, leverage
+  - Metric cards: Gross Return, Net Return, Fees, B&H, DD, Sharpe, WR, PF, Trades, Balance
+  - Equity curve con TradingView (Net + Gross + Buy & Hold)
+  - Trades table con Fee column
 
-**Datos**: CoinGecko ya provee datos históricos diarios hasta 365 días gratis.
+**Períodos soportados**: 1, 3, 7, 14, 30, 90, 180, 365 días
+
+---
+
+### 4b. 📟 Backtest CLI Tool — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: DevTools / Productividad
+
+**`backtest_cli.py`** (~320 líneas): Herramienta CLI para backtesting rápido sin abrir el browser.
+
+**Uso:**
+```bash
+# Single test
+python3 backtest_cli.py -s scalper -c bitcoin -p 30
+
+# Compare all 10 strategies vs BTC 90d
+python3 backtest_cli.py --compare
+
+# Run all 5 scalper variants with max periods
+python3 backtest_cli.py --scalpers
+
+# Multi-coin multi-period
+python3 backtest_cli.py -s trend_rider scalper -c bitcoin ethereum solana -p 30 90
+```
+
+**Features:**
+- Tabla comparativa con colores (verde/rojo)
+- Columnas: Strategy, Coin, Days, Gross, Net, Fees, B&H, Alpha, Trades, WR, PF, DD
+- Detalle individual: R:R, Sharpe, desglose Comm + Funding
+- Labels de coins (BTC, ETH, SOL)
+- `--scalpers` mode: ejecuta las 5 variantes de scalper con sus períodos óptimos
+- HTTP timeout 300s
+
+---
+
+### 4c. ⏱️ Scalper Pro — Variantes de Timeframe — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Trading / Estrategias
+
+4 nuevas variantes del Scalper Pro para diferentes timeframes, todas usando la misma arquitectura de 6 capas:
+
+| Variante | Candle | Período Max | Leverage | Risk | Resultado BTC |
+|----------|--------|:-----------:|:--------:|:----:|:-------------:|
+| **Scalper Pro 1h** | 1h | 180d | 5x | 4.0% | **+37.8%** (30d) |
+| **Scalper Pro 15m** | 15m | 90d | 6x | 3.5% | +11.6% (90d) |
+| **Scalper Pro 1m** | 1m | 3d | 10x | 2.0% | +3.0% (3d) |
+| **Scalper Pro 5m** | 5m | 30d | 7x | 3.0% | -6.9% (30d) |
+| **Scalper Pro 3m** | 3m | 14d | 8x | 2.5% | -32.2% (14d) |
+
+**Nota**: Timeframes más cortos generan más ruido. 1h y 15m son los más rentables.
+
+**Arquitectura de 6 capas del Scalper Pro:**
+1. **EMA Trend** (9>21>55): Filtro de dirección
+2. **RSI Pullback**: Entrada en pullback dentro de la tendencia
+3. **Bollinger Band**: Timing de entrada (pullback a soporte/resistencia)
+4. **MACD Momentum**: Crossover como catalizador
+5. **StochRSI**: Precisión de timing (cross from oversold/overbought)
+6. **Volume**: Confirmación final
+
+**Stops**: ATR×1.0 SL, ATR×3.0 TP (3:1 R:R mínimo)
+
+**Optimización de rendimiento**: Sliding window de 200 candles para indicadores (evita O(n²) con miles de candles de 1m/3m/5m).
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/strategies.py` | 4 nuevas configs + dispatch al mismo `_scalper()` |
+| `backend/services/backtester.py` | `_SCALPER_INTERVALS` mapping, close logic `startswith("scalper")` |
+| `main.py` | Períodos 1, 3 añadidos a validación |
+| `static/index.html` | Scalper 1m/3m/5m/15m en dropdown, 1d/3d en períodos |
+| `backtest_cli.py` | `--scalpers` mode |
+
+---
+
+### 4d. 💰 Modelo de Comisiones y Fees — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Backtesting / Realismo
+
+Simulación realista de costos de trading en Binance Futures:
+
+| Fee | Tasa | Aplicación |
+|-----|------|------------|
+| **Taker Fee** | 0.05% | Por lado (open + close) sobre valor de posición |
+| **Maker Fee** | 0.02% | (disponible, actualmente usa taker) |
+| **Funding Rate** | 0.01% | Cada 8 horas sobre valor de posición abierta |
+
+**Implementación:**
+
+- **Balance dual**: `balance` (net, con fees) y `balance_gross` (sin fees) trackeados en paralelo
+- **Fee por trade**: `_open_position()` retorna `(Position, open_fee)`, `_check_position_exit()` retorna `(cash_back, cash_back_gross, close_fee)`
+- **Funding simulation**: Se acumula cada N candles según el intervalo (8h / candle_hours)
+- **BacktestResult expandido**: `total_return_gross_pct`, `final_balance_gross`, `total_commissions`, `total_funding`, `total_fees`
+- **Equity curve**: 3 líneas — Net (azul), Gross (púrpura punteada), Buy & Hold (naranja)
+- **Trade records**: Campo `commission` por trade individual
+
+**Ejemplo real (Scalper Pro 1h, BTC 30d, $1000):**
+- Gross: **+18.4%** → Net: **+15.3%** (fees: $31.16 = $27.72 comm + $3.45 funding)
+
+**Frontend:**
+- Metric cards: Gross Return, Net Return, Total Fees (tooltip con desglose)
+- Equity curve con línea Gross adicional
+- Trades table con columna Fee
+
+**CLI:**
+- Líneas separadas: Gross, Net, Fees (Comm + Funding)
+- Tabla comparativa con columnas Gross, Net, Fees
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/backtester.py` | Constantes de fees, BacktestResult expandido, dual balance tracking, funding simulation |
+| `static/index.html` | Metric cards Gross/Net/Fees, equity curve gross line, trade Fee column |
+| `backtest_cli.py` | print_result y print_compare_table con Gross/Net/Fees |
+
+---
+
+### 4e. 🔄 Trend Rider v2 — Optimización con 3:1 R:R — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Trading / Estrategias
+
+Reescritura del Trend Rider aplicando los principios del Scalper Pro:
+
+**Cambios vs v1:**
+
+| Aspecto | v1 (antes) | v2 (después) |
+|---------|:----------:|:------------:|
+| R:R | 2:1 (ATR×2 SL, ATR×4 TP) | **3:1** (ATR×1.5 SL, ATR×4.5 TP) |
+| Estructura | Flat scoring (4 indicadores) | **6 capas** (como Scalper Pro) |
+| Pullback entry | No (entra en señal directa) | **Sí** (RSI 35-48 uptrend / 52-65 downtrend) |
+| Counter-trend penalty | No | **-2 puntos** |
+| Weak ADX penalty | Ninguno | **-2 puntos** (evita mercados choppy) |
+| Volume confirmation | No | **Sí** |
+| StochRSI timing | No | **Sí** |
+| BB timing | No | **Sí** (pullback a soporte/resistencia) |
+| **Hard gate** | Ninguno | **Requiere EMA 9>21>55 full alignment** para abrir |
+| Overextended filter | No | **Sí** (RSI >72 / <28 penaliza chasing) |
+
+**Resultados comparativos (Net, con comisiones):**
+
+| Test | v1 | v2 | Delta |
+|------|:--:|:--:|:-----:|
+| BTC 30d | +15.9% | **+23.1%** | +7.2 |
+| ETH 30d | +7.9% | **+16.6%** | +8.7 |
+| SOL 30d | +7.3% | **+17.7%** | +10.4 |
+| SOL 90d | +7.4% | **+17.6%** | +10.2 |
+| BTC 90d | +11.3% | +0.7% | -10.6 |
+| ETH 90d | +1.1% | -2.6% | -3.7 |
+| **Promedio** | **+8.5%** | **+12.2%** | **+3.7** |
+
+**Tradeoff**: 30d mejoró dramáticamente. 90d en BTC/ETH bajó porque el mercado fue fuertemente bajista y el 3:1 R:R con stops más tight genera más stopouts. SOL 90d mejoró +10.2%.
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/strategies.py` | `_trend_rider()` reescrito (6 capas + hard gate), config risk 2.5% |
 
 ---
 
@@ -365,8 +543,12 @@ Bot de Telegram y/o email para notificar:
 3.  LLM Análisis (Gemini 2.0 Flash) ──→ ✅ COMPLETADO (2026-02-19)
 3b. Migración a Binance Futures API ──→ ✅ COMPLETADO (2026-02-19)
 3c. Trade → Decision Tracking ──→ ✅ COMPLETADO (2026-02-19)
-4.  Backtesting ──→ next (dependencia: estrategias ✅)
-5.  Notificaciones ──→ add-on independiente
+4.  Backtesting ──→ ✅ COMPLETADO (2026-02-19)
+4b. Backtest CLI Tool ──→ ✅ COMPLETADO (2026-02-19)
+4c. Scalper Pro Variantes (1m/3m/5m/15m) ──→ ✅ COMPLETADO (2026-02-19)
+4d. Modelo de Comisiones y Fees ──→ ✅ COMPLETADO (2026-02-19)
+4e. Trend Rider v2 (3:1 R:R) ──→ ✅ COMPLETADO (2026-02-19)
+5.  Notificaciones ──→ next (add-on independiente)
 ```
 
 ---
@@ -382,24 +564,28 @@ Bot de Telegram y/o email para notificar:
 | Noticias | RSS feeds | CoinDesk, CoinTelegraph, Bitcoin Magazine + CryptoPanic (opcional) |
 | Charts | TradingView Lightweight Charts v4 | CDN, open source, candlestick + indicadores |
 | Indicadores | RSI, MACD, BB, EMA, SMA, ATR, ADX, StochRSI, Volume | Library completa en strategies.py |
-| Estrategias | 6 elite (trend/mean_rev/momentum/scalper/grid/confluence) | StrategyEngine con scoring + signal generation |
+| Estrategias | 10 (trend/mean_rev/momentum/scalper×5/grid/confluence) | StrategyEngine con scoring + signal generation |
+| Backtesting | Motor completo con commission model | Replay de klines, dual balance (gross/net), funding rate |
+| CLI | backtest_cli.py | Comparativas rápidas, --compare, --scalpers |
 | Futuros | LONG/SHORT, leverage 1-125x, liquidation, SL/TP | Position sizing profesional |
 | Scheduler | APScheduler | Ciclo de trading cada 60s |
 | Async | asyncio.to_thread() | Trading cycle nunca bloquea el event loop |
 
-### Estructura de archivos (~7,200+ líneas)
+### Estructura de archivos (~9,500+ líneas)
 
 | Archivo | Líneas | Responsabilidad |
 |---------|--------|----------------|
-| `main.py` | 540+ | Endpoints, scheduler, WebSocket |
-| `backend/services/strategies.py` | 1140 | Indicadores técnicos, 6 estrategias, position sizing |
+| `main.py` | 595+ | Endpoints, scheduler, WebSocket, backtest API |
+| `backend/services/strategies.py` | 1400+ | Indicadores técnicos, 10 estrategias, position sizing |
+| `backend/services/backtester.py` | 700+ | Motor de backtesting, commission model, sliding window |
 | `backend/services/market_data.py` | 780+ | RateLimiter, BinanceProvider (Futures+Spot), MarketDataService |
 | `backend/services/trading_agent.py` | 570+ | Futures lifecycle, strategy engine, LLM integration |
 | `backend/services/llm_service.py` | 270 | Gemini 2.0 Flash, LLMAnalysis, rate limiting |
 | `backend/services/news_service.py` | 313 | RSS feeds, sentimiento por keywords |
 | `backend/models/database.py` | 130+ | 6 modelos SQLAlchemy (con campos futures + LLM + decision_id) |
-| `static/index.html` | 1450+ | Dashboard con strategy picker, futures UI, LLM blocks, decision modal |
+| `static/index.html` | 1830+ | Dashboard + Backtesting SPA, strategy picker, futures UI, LLM blocks |
 | `static/charts.js` | 359 | Módulo de charts TradingView |
+| `backtest_cli.py` | 320+ | CLI de backtesting, comparativas, colores |
 
 ---
 
