@@ -469,6 +469,21 @@ class TradingAgentService:
 
     # ── Close Position ────────────────────────────────────────────────────
 
+    def close_position_manual(
+        self, agent: TradingAgent, pos: Portfolio, db: Session
+    ) -> Dict:
+        """Public method for manual (user-triggered) position close."""
+        current_price = self.market_service.get_coin_price(pos.cryptocurrency)
+        if not current_price:
+            raise ValueError(f"Cannot get price for {pos.cryptocurrency}")
+        strategy_key = agent.strategy or "confluence_master"
+        result = self._close_position(
+            agent, pos, current_price, db,
+            reason=f"🖐 Manual close by user at ${current_price:.2f}",
+            strategy_key=strategy_key,
+        )
+        return result
+
     def _close_position(
         self, agent: TradingAgent, pos: Portfolio,
         current_price: float, db: Session,

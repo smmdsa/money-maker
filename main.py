@@ -188,6 +188,7 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
             pnl_pct = (unrealized / item.margin * 100) if item.margin > 0 else 0
             
             portfolio_items.append({
+                "id": item.id,
                 "cryptocurrency": item.cryptocurrency,
                 "symbol": item.symbol,
                 "amount": item.amount,
@@ -223,6 +224,43 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         "portfolio": portfolio_items,
         "created_at": agent.created_at.isoformat()
     }
+
+
+@app.post("/api/agents/{agent_id}/positions/{position_id}/close")
+def close_position(agent_id: int, position_id: int, db: Session = Depends(get_db)):
+    """Manually close a single position"""
+    agent = db.query(TradingAgent).filter(TradingAgent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    pos = db.query(Portfolio).filter(
+        Portfolio.id == position_id, Portfolio.agent_id == agent_id
+    ).first()
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+    try:
+        result = trading_service.close_position_manual(agent, pos, db)
+        return {"status": "closed", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/agents/{agent_id}/positions/close-all")
+def close_all_positions(agent_id: int, db: Session = Depends(get_db)):
+    """Manually close all open positions for an agent"""
+    agent = db.query(TradingAgent).filter(TradingAgent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    positions = [p for p in agent.portfolio if p.amount > 0]
+    if not positions:
+        raise HTTPException(status_code=400, detail="No open positions")
+    results = []
+    for pos in positions:
+        try:
+            result = trading_service.close_position_manual(agent, pos, db)
+            results.append(result)
+        except Exception as e:
+            results.append({"coin": pos.cryptocurrency, "error": str(e)})
+    return {"status": "closed", "count": len(results), "results": results}
 
 
 @app.patch("/api/agents/{agent_id}")

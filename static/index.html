@@ -709,6 +709,127 @@
             background: #fff3e0;
             color: #e65100;
         }
+
+        /* ── Open Positions Section (full-width) ── */
+        .positions-section {
+            margin-bottom: 20px;
+        }
+        .positions-section .chart-card {
+            position: relative;
+        }
+        .positions-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .positions-header h2 {
+            color: #333;
+            font-size: 1.3em;
+            margin: 0;
+            border: none;
+            padding: 0;
+        }
+        .positions-header .btn-close-all {
+            background: #c62828;
+            color: #fff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        .positions-header .btn-close-all:hover { background: #b71c1c; }
+        .pos-card {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr auto;
+            gap: 12px;
+            align-items: center;
+            transition: box-shadow 0.2s;
+        }
+        .pos-card:hover {
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        .pos-card .pos-coin {
+            font-size: 1.1em;
+            font-weight: 700;
+            color: #333;
+        }
+        .pos-card .pos-meta { font-size: 0.85em; color: #666; }
+        .pos-card .pos-meta span { display: block; margin-top: 3px; }
+        .pos-card .pos-prices {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+            text-align: center;
+        }
+        .pos-card .pos-prices .price-label {
+            font-size: 0.7em;
+            text-transform: uppercase;
+            color: #999;
+            font-weight: 600;
+        }
+        .pos-card .pos-prices .price-val {
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+        .pos-card .pos-prices .price-val.sl { color: #c62828; }
+        .pos-card .pos-prices .price-val.tp { color: #2e7d32; }
+        .pos-card .pos-prices .price-val.liq { color: #e65100; }
+        .pos-card .pos-pnl {
+            text-align: right;
+        }
+        .pos-card .pos-pnl .pnl-value {
+            font-size: 1.05em;
+            font-weight: 700;
+        }
+        .pos-card .pos-pnl .pnl-pct {
+            font-size: 0.8em;
+        }
+        .pos-card .btn-close-pos {
+            background: #ef5350;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.8em;
+            font-weight: 600;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        .pos-card .btn-close-pos:hover { background: #c62828; }
+        .pos-progress-bar {
+            grid-column: 1 / -1;
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            position: relative;
+            margin-top: 4px;
+        }
+        .pos-progress-bar .bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        @media (max-width: 800px) {
+            .pos-card {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+            .pos-card .pos-pnl { text-align: center; }
+        }
         .badge-strategy {
             display: inline-block;
             padding: 2px 8px;
@@ -835,7 +956,20 @@
             </div>
         </div>
 
-        <!-- ── Equity Curve + Agent Details Row ───────────────────── -->
+        <!-- ── Open Positions Section (full-width) ────────────────── -->
+        <div class="positions-section" id="positionsSection" style="display: none;">
+            <div class="chart-card">
+                <div class="positions-header">
+                    <h2>📊 Open Positions</h2>
+                    <button class="btn-close-all" id="btnCloseAll" onclick="closeAllPositions()" style="display:none;">✕ Close All</button>
+                </div>
+                <div id="positionsContainer">
+                    <div class="empty">No open positions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Equity Curve ───────────────────────────────────────── -->
         <div class="equity-section" id="equitySection" style="display: none;">
             <div class="chart-card">
                 <h2 style="color:#333;font-size:1.3em;margin-bottom:15px;border-bottom:2px solid #667eea;padding-bottom:10px;">📈 Agent Equity Curve</h2>
@@ -1063,10 +1197,10 @@
             
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
-                if (data.type === 'trade_update') {
-                    // Refresh data when trades happen
+                if (data.type === 'trade_update' || data.type === 'risk_alert') {
+                    // Refresh data when trades or risk monitor closings happen
                     loadAgents();
-                    if (selectedAgentId === data.agent_id) {
+                    if (selectedAgentId) {
                         loadAgentDetails(selectedAgentId);
                         loadTrades(selectedAgentId);
                         loadDecisions(selectedAgentId);
@@ -1130,7 +1264,9 @@
             loadTrades(agentId);
             loadDecisions(agentId);
 
-            // Show equity section and load equity curve
+            // Show positions + equity sections
+            const posSection = document.getElementById('positionsSection');
+            if (posSection) posSection.style.display = 'block';
             const eqSection = document.getElementById('equitySection');
             if (eqSection) eqSection.style.display = 'block';
             if (typeof Charts !== 'undefined') {
@@ -1159,42 +1295,139 @@
                             (${agent.profit_loss_pct.toFixed(2)}%)
                         </p>
                         
-                        ${agent.portfolio.length > 0 ? `
-                            <h4 style="margin-top: 20px;">Open Positions</h4>
-                            <table class="portfolio-table">
-                                <thead>
-                                    <tr>
-                                        <th>Coin</th>
-                                        <th>Type</th>
-                                        <th>Leverage</th>
-                                        <th>Margin</th>
-                                        <th>P/L</th>
-                                        <th>Liq. Price</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${agent.portfolio.map(p => `
-                                        <tr>
-                                            <td><strong>${p.symbol}</strong></td>
-                                            <td><span class="badge-${p.position_type}">${p.position_type.toUpperCase()}</span></td>
-                                            <td><span class="badge-leverage">${p.leverage}x</span></td>
-                                            <td>$${p.margin.toFixed(2)}</td>
-                                            <td class="${p.profit_loss >= 0 ? 'profit' : 'loss'}">
-                                                ${p.profit_loss >= 0 ? '+' : ''}$${p.profit_loss.toFixed(4)}
-                                                <br><small>(${p.profit_loss_pct.toFixed(2)}%)</small>
-                                            </td>
-                                            <td><small>$${fmtPrice(p.liquidation_price)}</small></td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        ` : '<p style="margin-top: 15px; color: #999;">No open positions</p>'}
+                        ${agent.portfolio.length > 0
+                            ? `<p style="margin-top: 15px; color: #667eea; font-weight: 600;">📊 ${agent.portfolio.length} open position${agent.portfolio.length > 1 ? 's' : ''} — see below</p>`
+                            : '<p style="margin-top: 15px; color: #999;">No open positions</p>'}
                     </div>
                 `;
                 
                 document.getElementById('agentDetails').innerHTML = detailsHtml;
+
+                // Render positions in full-width section
+                renderPositions(agent);
             } catch (error) {
                 console.error('Error loading agent details:', error);
+            }
+        }
+
+        // Render open positions in the dedicated section
+        function renderPositions(agent) {
+            const section = document.getElementById('positionsSection');
+            const container = document.getElementById('positionsContainer');
+            const btnCloseAll = document.getElementById('btnCloseAll');
+
+            if (!agent.portfolio || agent.portfolio.length === 0) {
+                container.innerHTML = '<div class="empty">No open positions</div>';
+                btnCloseAll.style.display = 'none';
+                return;
+            }
+
+            btnCloseAll.style.display = 'inline-block';
+            container.innerHTML = agent.portfolio.map(p => {
+                const isLong = p.position_type === 'long';
+                const pnlClass = p.profit_loss >= 0 ? 'profit' : 'loss';
+                const pnlSign = p.profit_loss >= 0 ? '+' : '';
+
+                // Compute how far price is between SL and TP (progress bar)
+                let progressPct = 50;
+                if (p.stop_loss_price > 0 && p.take_profit_price > 0 && p.current_price) {
+                    const range = Math.abs(p.take_profit_price - p.stop_loss_price);
+                    if (range > 0) {
+                        const fromSL = isLong
+                            ? (p.current_price - p.stop_loss_price)
+                            : (p.stop_loss_price - p.current_price);
+                        progressPct = Math.max(0, Math.min(100, (fromSL / range) * 100));
+                    }
+                }
+                const barColor = progressPct > 60 ? '#4caf50' : progressPct > 30 ? '#ff9800' : '#f44336';
+
+                // Expected profit at TP and expected loss at SL
+                const expProfitRaw = p.take_profit_price > 0
+                    ? (isLong ? p.amount * (p.take_profit_price - p.avg_buy_price)
+                              : p.amount * (p.avg_buy_price - p.take_profit_price))
+                    : null;
+                const expLossRaw = p.stop_loss_price > 0
+                    ? (isLong ? p.amount * (p.stop_loss_price - p.avg_buy_price)
+                              : p.amount * (p.avg_buy_price - p.stop_loss_price))
+                    : null;
+                const expProfitPct = expProfitRaw != null && p.margin > 0 ? (expProfitRaw / p.margin * 100) : null;
+                const expLossPct   = expLossRaw != null && p.margin > 0 ? (expLossRaw / p.margin * 100) : null;
+
+                return `
+                <div class="pos-card">
+                    <div>
+                        <div class="pos-coin">
+                            ${p.symbol}
+                            <span class="badge-${p.position_type}">${p.position_type.toUpperCase()}</span>
+                            <span class="badge-leverage">${p.leverage}x</span>
+                        </div>
+                        <div class="pos-meta">
+                            <span>Margin: <strong>$${p.margin.toFixed(2)}</strong></span>
+                            <span>Entry: <strong>$${fmtPrice(p.avg_buy_price)}</strong></span>
+                            <span>Current: <strong>$${fmtPrice(p.current_price)}</strong></span>
+                        </div>
+                    </div>
+                    <div class="pos-prices">
+                        <div>
+                            <div class="price-label">Stop Loss</div>
+                            <div class="price-val sl">$${p.stop_loss_price > 0 ? fmtPrice(p.stop_loss_price) : '—'}</div>
+                            ${expLossRaw != null ? `<div class="price-expected sl" style="font-size:0.75em;margin-top:2px;">${expLossRaw >= 0 ? '+' : ''}$${expLossRaw.toFixed(2)} (${expLossPct.toFixed(1)}%)</div>` : ''}
+                        </div>
+                        <div>
+                            <div class="price-label">Take Profit</div>
+                            <div class="price-val tp">$${p.take_profit_price > 0 ? fmtPrice(p.take_profit_price) : '—'}</div>
+                            ${expProfitRaw != null ? `<div class="price-expected tp" style="font-size:0.75em;margin-top:2px;">+$${expProfitRaw.toFixed(2)} (+${expProfitPct.toFixed(1)}%)</div>` : ''}
+                        </div>
+                        <div>
+                            <div class="price-label">Liquidation</div>
+                            <div class="price-val liq">$${p.liquidation_price > 0 ? fmtPrice(p.liquidation_price) : '—'}</div>
+                        </div>
+                    </div>
+                    <div class="pos-pnl">
+                        <div class="pnl-value ${pnlClass}">${pnlSign}$${p.profit_loss.toFixed(4)}</div>
+                        <div class="pnl-pct ${pnlClass}">${pnlSign}${p.profit_loss_pct.toFixed(2)}%</div>
+                    </div>
+                    <div>
+                        <button class="btn-close-pos" onclick="closePosition(${agent.id}, ${p.id}, '${p.symbol}', event)">✕ Close</button>
+                    </div>
+                    <div class="pos-progress-bar">
+                        <div class="bar-fill" style="width:${progressPct}%;background:${barColor};"></div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // Close a single position
+        async function closePosition(agentId, positionId, symbol, event) {
+            if (event) event.stopPropagation();
+            if (!confirm(`Close ${symbol} position?`)) return;
+            try {
+                const resp = await fetch(`/api/agents/${agentId}/positions/${positionId}/close`, { method: 'POST' });
+                if (!resp.ok) { const e = await resp.json(); alert(e.detail || 'Error'); return; }
+                loadAgentDetails(agentId);
+                loadAgents();
+                loadTrades(agentId);
+                loadDecisions(agentId);
+            } catch (err) {
+                console.error('Close position error:', err);
+                alert('Failed to close position');
+            }
+        }
+
+        // Close all positions
+        async function closeAllPositions() {
+            if (!selectedAgentId) return;
+            if (!confirm('Close ALL open positions?')) return;
+            try {
+                const resp = await fetch(`/api/agents/${selectedAgentId}/positions/close-all`, { method: 'POST' });
+                if (!resp.ok) { const e = await resp.json(); alert(e.detail || 'Error'); return; }
+                loadAgentDetails(selectedAgentId);
+                loadAgents();
+                loadTrades(selectedAgentId);
+                loadDecisions(selectedAgentId);
+            } catch (err) {
+                console.error('Close all error:', err);
+                alert('Failed to close positions');
             }
         }
         
@@ -1791,6 +2024,19 @@
         async function refreshPrices() {
             await loadMarketPrices();
             resetPriceCountdown();
+
+            // Update chart last candle with fresh price
+            if (typeof Charts !== 'undefined') {
+                try {
+                    const coin = Charts.getCurrentCoin();
+                    const resp = await fetch(`/api/market/${coin}`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const price = data.current_price || data.price;
+                        if (price) Charts.updateLastPrice(coin, price);
+                    }
+                } catch (e) { /* silent */ }
+            }
         }
 
         async function refreshNews() {

@@ -24,6 +24,8 @@ const Charts = (() => {
     let currentCoin = 'bitcoin';
     let currentDays = 14;
 
+    let lastOhlcData = [];   // Keep reference to last loaded OHLC data
+
     const CHART_BG = '#ffffff';
     const GRID_COLOR = '#f0f0f0';
     const CANDLE_UP = '#26a69a';
@@ -259,6 +261,7 @@ const Charts = (() => {
             }).sort((a, b) => a.time - b.time);
 
             candlestickSeries.setData(cleanData);
+            lastOhlcData = cleanData;   // Keep reference for live updates
             sma7Series.setData(computeSMA(cleanData, 7));
             sma21Series.setData(computeSMA(cleanData, 21));
 
@@ -355,5 +358,27 @@ const Charts = (() => {
         loadEquity,
         getCurrentCoin() { return currentCoin; },
         getCurrentDays() { return currentDays; },
-    };
+        /**
+         * Update the last candle's close (and high/low) with a fresh price.
+         * Called every 15s from the price-refresh cycle so the chart stays
+         * in sync with the Market Prices section.
+         */
+        updateLastPrice(coin, price) {
+            if (!candlestickSeries || coin !== currentCoin || !price) return;
+            if (lastOhlcData.length === 0) return;
+
+            const lastBar = lastOhlcData[lastOhlcData.length - 1];
+
+            const updated = {
+                time: lastBar.time,
+                open: lastBar.open,
+                high: Math.max(lastBar.high, price),
+                low: Math.min(lastBar.low, price),
+                close: price,
+            };
+
+            // Update in-memory reference too
+            lastOhlcData[lastOhlcData.length - 1] = updated;
+            candlestickSeries.update(updated);
+        },    };
 })();
