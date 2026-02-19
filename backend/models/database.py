@@ -1,5 +1,6 @@
 """
-Database models for the trading application
+Database models for the trading application.
+Supports futures trading: long/short positions with leverage.
 """
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.ext.declarative import declarative_base
@@ -18,6 +19,8 @@ class TradingAgent(Base):
     initial_balance = Column(Float)
     current_balance = Column(Float)
     status = Column(String, default="active")  # active, paused, stopped
+    strategy = Column(String, default="confluence_master")  # strategy key
+    max_leverage = Column(Integer, default=10)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -29,16 +32,22 @@ class TradingAgent(Base):
 
 
 class Portfolio(Base):
-    """Portfolio holdings for each agent"""
+    """Portfolio positions (spot and futures) for each agent"""
     __tablename__ = "portfolio"
     
     id = Column(Integer, primary_key=True, index=True)
     agent_id = Column(Integer, ForeignKey("trading_agents.id"))
     cryptocurrency = Column(String)  # e.g., "bitcoin", "ethereum"
-    symbol = Column(String)  # e.g., "BTC", "ETH"
-    amount = Column(Float)
-    avg_buy_price = Column(Float)
+    symbol = Column(String)          # e.g., "BTC", "ETH"
+    amount = Column(Float)           # coin quantity (virtual for shorts)
+    avg_buy_price = Column(Float)    # entry price
     current_price = Column(Float)
+    position_type = Column(String, default="long")    # "long" or "short"
+    leverage = Column(Integer, default=1)
+    margin = Column(Float, default=0.0)               # USD committed as collateral
+    liquidation_price = Column(Float, default=0.0)
+    stop_loss_price = Column(Float, default=0.0)
+    take_profit_price = Column(Float, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     agent = relationship("TradingAgent", back_populates="portfolio")
@@ -52,11 +61,13 @@ class Trade(Base):
     agent_id = Column(Integer, ForeignKey("trading_agents.id"))
     cryptocurrency = Column(String)
     symbol = Column(String)
-    trade_type = Column(String)  # buy, sell
+    trade_type = Column(String)      # open_long, close_long, open_short, close_short
     amount = Column(Float)
     price = Column(Float)
     total_value = Column(Float)
     profit_loss = Column(Float, default=0.0)
+    leverage = Column(Integer, default=1)
+    margin = Column(Float, default=0.0)
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     agent = relationship("TradingAgent", back_populates="trades")
@@ -71,10 +82,11 @@ class Decision(Base):
     decision_type = Column(String)  # analysis, trade, hold
     cryptocurrency = Column(String)
     reasoning = Column(String)
-    indicators = Column(JSON)  # Technical indicators used
-    news_considered = Column(JSON, nullable=True)  # News events considered
-    action_taken = Column(String)  # buy, sell, hold
+    indicators = Column(JSON)
+    news_considered = Column(JSON, nullable=True)
+    action_taken = Column(String)   # long, short, close_long, close_short, hold
     confidence = Column(Float)
+    strategy = Column(String, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     agent = relationship("TradingAgent", back_populates="decisions")

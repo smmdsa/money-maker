@@ -470,6 +470,73 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Position type badges */
+        .badge-long {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 700;
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .badge-short {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 700;
+            background: #fce4ec;
+            color: #c62828;
+        }
+        .badge-leverage {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.7em;
+            font-weight: 700;
+            background: #fff3e0;
+            color: #e65100;
+        }
+        .badge-strategy {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7em;
+            font-weight: 600;
+            background: #ede7f6;
+            color: #5e35b1;
+        }
+        .strategy-card {
+            border: 2px solid #eee;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 6px 0;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .strategy-card:hover {
+            border-color: #667eea;
+        }
+        .strategy-card.selected {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+        .strategy-card h4 {
+            margin: 0 0 4px 0;
+            font-size: 0.95em;
+        }
+        .strategy-card p {
+            margin: 0;
+            font-size: 0.8em;
+            color: #666;
+        }
+        .strategy-card .strategy-meta {
+            font-size: 0.75em;
+            color: #999;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
@@ -504,7 +571,7 @@
                     <div style="display:flex;align-items:center;gap:10px;">
                         <span id="dataSourceBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:#e3f2fd;color:#1565c0;font-weight:600;white-space:nowrap;"></span>
                         <div class="countdown" id="priceCountdown">
-                            <span id="priceCountdownText">30s</span>
+                            <span id="priceCountdownText">60s</span>
                             <div class="countdown-bar">
                                 <div class="countdown-bar-fill" id="priceCountdownBar" style="width: 100%"></div>
                             </div>
@@ -578,7 +645,7 @@
                 <div class="card-header">
                     <h2>Market News & Events</h2>
                     <div class="countdown" id="newsCountdown">
-                        <span id="newsCountdownText">30s</span>
+                        <span id="newsCountdownText">60s</span>
                         <div class="countdown-bar">
                             <div class="countdown-bar-fill" id="newsCountdownBar" style="width: 100%"></div>
                         </div>
@@ -593,7 +660,7 @@
     
     <!-- Create Agent Modal -->
     <div class="modal" id="createAgentModal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 600px;">
             <span class="close-btn" onclick="hideCreateAgentModal()">&times;</span>
             <h2>Create New Trading Agent</h2>
             <form id="createAgentForm" onsubmit="createAgent(event)">
@@ -605,7 +672,20 @@
                     <label>Initial Balance (USD)</label>
                     <input type="number" id="initialBalance" required value="10000" step="50" min="50">
                 </div>
-                <button type="submit" class="btn">Create Agent</button>
+                <div class="form-group">
+                    <label>Max Leverage</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <input type="range" id="maxLeverage" min="1" max="50" value="10" style="flex:1"
+                               oninput="document.getElementById('leverageLabel').textContent = this.value + 'x'">
+                        <span id="leverageLabel" style="font-weight:700;min-width:40px;">10x</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Trading Strategy</label>
+                    <div id="strategyList" style="max-height:280px;overflow-y:auto;">Loading strategies...</div>
+                </div>
+                <input type="hidden" id="selectedStrategy" value="confluence_master">
+                <button type="submit" class="btn" style="width:100%;">Create Agent</button>
             </form>
         </div>
     </div>
@@ -659,9 +739,11 @@
                     <div class="agent-item ${selectedAgentId === agent.id ? 'selected' : ''}" onclick="selectAgent(${agent.id})">
                         <div class="agent-name">${agent.name}</div>
                         <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span>
+                        <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
                         <div class="agent-stats">
                             <div>
                                 <strong>Total Value:</strong> $${agent.total_value.toFixed(2)}
+                                ${agent.open_positions > 0 ? `<span class="badge-leverage">${agent.open_positions} pos</span>` : ''}
                             </div>
                             <div class="${agent.profit_loss >= 0 ? 'profit' : 'loss'}">
                                 ${agent.profit_loss >= 0 ? '+' : ''}${agent.profit_loss.toFixed(2)} 
@@ -708,9 +790,11 @@
                     <div>
                         <h3>${agent.name}</h3>
                         <p><strong>Status:</strong> <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span></p>
+                        <p><strong>Strategy:</strong> <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
+                           <span class="badge-leverage">${agent.max_leverage}x max</span></p>
                         <p><strong>Initial Balance:</strong> $${agent.initial_balance.toFixed(2)}</p>
-                        <p><strong>Current Cash:</strong> $${agent.current_balance.toFixed(2)}</p>
-                        <p><strong>Portfolio Value:</strong> $${agent.portfolio_value.toFixed(2)}</p>
+                        <p><strong>Available Cash:</strong> $${agent.current_balance.toFixed(2)}</p>
+                        <p><strong>Positions Value:</strong> $${agent.portfolio_value.toFixed(2)}</p>
                         <p><strong>Total Value:</strong> $${agent.total_value.toFixed(2)}</p>
                         <p class="${agent.profit_loss >= 0 ? 'profit' : 'loss'}">
                             <strong>Profit/Loss:</strong> ${agent.profit_loss >= 0 ? '+' : ''}$${agent.profit_loss.toFixed(2)} 
@@ -718,30 +802,35 @@
                         </p>
                         
                         ${agent.portfolio.length > 0 ? `
-                            <h4 style="margin-top: 20px;">Portfolio</h4>
+                            <h4 style="margin-top: 20px;">Open Positions</h4>
                             <table class="portfolio-table">
                                 <thead>
                                     <tr>
                                         <th>Coin</th>
-                                        <th>Amount</th>
-                                        <th>Value</th>
+                                        <th>Type</th>
+                                        <th>Leverage</th>
+                                        <th>Margin</th>
                                         <th>P/L</th>
+                                        <th>Liq. Price</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     ${agent.portfolio.map(p => `
                                         <tr>
                                             <td><strong>${p.symbol}</strong></td>
-                                            <td>${p.amount.toFixed(6)}</td>
-                                            <td>$${p.value.toFixed(2)}</td>
+                                            <td><span class="badge-${p.position_type}">${p.position_type.toUpperCase()}</span></td>
+                                            <td><span class="badge-leverage">${p.leverage}x</span></td>
+                                            <td>$${p.margin.toFixed(2)}</td>
                                             <td class="${p.profit_loss >= 0 ? 'profit' : 'loss'}">
                                                 ${p.profit_loss >= 0 ? '+' : ''}$${p.profit_loss.toFixed(2)}
+                                                <br><small>(${p.profit_loss_pct.toFixed(1)}%)</small>
                                             </td>
+                                            <td><small>$${p.liquidation_price.toFixed(2)}</small></td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
                             </table>
-                        ` : '<p style="margin-top: 15px; color: #999;">No positions yet</p>'}
+                        ` : '<p style="margin-top: 15px; color: #999;">No open positions</p>'}
                     </div>
                 `;
                 
@@ -764,20 +853,26 @@
                     return;
                 }
                 
-                tradeLog.innerHTML = trades.map(trade => `
+                tradeLog.innerHTML = trades.map(trade => {
+                    const isOpen = trade.trade_type.startsWith('open_');
+                    const isLong = trade.trade_type.includes('long');
+                    const typeLabel = trade.trade_type.replace(/_/g, ' ').toUpperCase();
+                    const typeBadge = isLong ? 'badge-long' : 'badge-short';
+                    return `
                     <div class="log-item">
                         <div class="log-time">${new Date(trade.timestamp).toLocaleString()}</div>
                         <div class="log-content">
-                            <strong>${trade.trade_type.toUpperCase()}</strong> ${trade.amount.toFixed(6)} ${trade.symbol} 
-                            @ $${trade.price.toFixed(2)}
+                            <span class="${typeBadge}">${typeLabel}</span>
+                            ${trade.leverage > 1 ? `<span class="badge-leverage">${trade.leverage}x</span>` : ''}
+                            ${trade.symbol} @ $${trade.price.toFixed(2)}
                             <br>
-                            Total: $${trade.total_value.toFixed(2)}
+                            Margin: $${trade.margin.toFixed(2)} | Size: $${trade.total_value.toFixed(2)}
                             ${trade.profit_loss !== 0 ? `<br><span class="${trade.profit_loss >= 0 ? 'profit' : 'loss'}">
                                 P/L: ${trade.profit_loss >= 0 ? '+' : ''}$${trade.profit_loss.toFixed(2)}
                             </span>` : ''}
                         </div>
                     </div>
-                `).join('');
+                `}).join('');
             } catch (error) {
                 console.error('Error loading trades:', error);
             }
@@ -796,11 +891,16 @@
                     return;
                 }
                 
-                decisionLog.innerHTML = decisions.map(decision => `
+                decisionLog.innerHTML = decisions.map(decision => {
+                    const actionClass = decision.action_taken.includes('long') ? 'badge-long'
+                        : decision.action_taken.includes('short') ? 'badge-short' : '';
+                    return `
                     <div class="log-item">
                         <div class="log-time">${new Date(decision.timestamp).toLocaleString()}</div>
                         <div class="log-content">
-                            <strong>${decision.cryptocurrency.toUpperCase()}</strong>: ${decision.action_taken.toUpperCase()}
+                            <strong>${decision.cryptocurrency.toUpperCase()}</strong>:
+                            <span class="${actionClass}">${decision.action_taken.replace(/_/g, ' ').toUpperCase()}</span>
+                            ${decision.strategy ? `<span class="badge-strategy">${decision.strategy.replace(/_/g, ' ')}</span>` : ''}
                             <br>
                             Confidence: ${(decision.confidence * 100).toFixed(0)}%
                             <br>
@@ -810,7 +910,7 @@
                             ` : ''}
                         </div>
                     </div>
-                `).join('');
+                `}).join('');
             } catch (error) {
                 console.error('Error loading decisions:', error);
             }
@@ -893,6 +993,8 @@
             
             const name = document.getElementById('agentName').value;
             const initialBalance = parseFloat(document.getElementById('initialBalance').value);
+            const strategy = document.getElementById('selectedStrategy').value;
+            const maxLeverage = parseInt(document.getElementById('maxLeverage').value);
             
             try {
                 const response = await fetch('/api/agents', {
@@ -900,7 +1002,12 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ name, initial_balance: initialBalance })
+                    body: JSON.stringify({
+                        name,
+                        initial_balance: initialBalance,
+                        strategy: strategy,
+                        max_leverage: maxLeverage,
+                    })
                 });
                 
                 if (response.ok) {
@@ -967,6 +1074,38 @@
         // Modal functions
         function showCreateAgentModal() {
             document.getElementById('createAgentModal').classList.add('active');
+            loadStrategies();
+        }
+
+        // Load strategies for the create agent modal
+        async function loadStrategies() {
+            try {
+                const resp = await fetch('/api/strategies');
+                const strategies = await resp.json();
+                const container = document.getElementById('strategyList');
+                const selected = document.getElementById('selectedStrategy').value;
+
+                container.innerHTML = Object.values(strategies).map(s => `
+                    <div class="strategy-card ${s.key === selected ? 'selected' : ''}"
+                         onclick="selectStrategy('${s.key}', this)">
+                        <h4>${s.name}</h4>
+                        <p>${s.description}</p>
+                        <div class="strategy-meta">
+                            Leverage: ${s.default_leverage}-${s.max_leverage}x |
+                            Max Positions: ${s.max_positions} |
+                            Risk/Trade: ${s.risk_per_trade_pct}%
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Error loading strategies:', e);
+            }
+        }
+
+        function selectStrategy(key, el) {
+            document.getElementById('selectedStrategy').value = key;
+            document.querySelectorAll('.strategy-card').forEach(c => c.classList.remove('selected'));
+            el.classList.add('selected');
         }
         
         function hideCreateAgentModal() {
@@ -974,7 +1113,7 @@
         }
         
         // ── Countdown Timer ──────────────────────────────────────────────
-        const REFRESH_INTERVAL = 30; // seconds
+        const REFRESH_INTERVAL = 60; // seconds — matches backend cache TTL & trading cycle
         let priceSecondsLeft = REFRESH_INTERVAL;
         let newsSecondsLeft = REFRESH_INTERVAL;
 
@@ -1029,11 +1168,11 @@
                 Charts.loadOHLC('bitcoin', 14);
             }
 
-            // Refresh prices & news every 30 seconds
+            // Refresh prices & news every 60 seconds
             setInterval(refreshPrices, REFRESH_INTERVAL * 1000);
             setInterval(refreshNews, REFRESH_INTERVAL * 1000);
 
-            // Refresh agents & selected details every 30 seconds
+            // Refresh agents & selected details every 60 seconds
             setInterval(() => {
                 loadAgents();
                 if (selectedAgentId) {
@@ -1041,7 +1180,7 @@
                     loadTrades(selectedAgentId);
                     loadDecisions(selectedAgentId);
                 }
-            }, 30000);
+            }, REFRESH_INTERVAL * 1000);
         });
     </script>
 </body>

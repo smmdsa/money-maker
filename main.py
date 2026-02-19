@@ -16,6 +16,7 @@ from backend.models.database import TradingAgent, Portfolio, Trade, Decision, Ne
 from backend.services.market_data import MarketDataService
 from backend.services.trading_agent import TradingAgentService
 from backend.services.news_service import NewsService
+from backend.services.strategies import STRATEGIES
 from pydantic import BaseModel
 
 # Configure logging
@@ -59,10 +60,8 @@ manager = ConnectionManager()
 class AgentCreate(BaseModel):
     name: str
     initial_balance: float = 10000.0
-
-    def validate_balance(self):
-        if self.initial_balance < 50:
-            raise ValueError("Minimum initial balance is $50 USD")
+    strategy: str = "confluence_master"
+    max_leverage: int = 10
 
 
 class AgentUpdate(BaseModel):
@@ -84,6 +83,10 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
     # Check if agent name already exists
     if agent.initial_balance < 50:
         raise HTTPException(status_code=400, detail="Minimum initial balance is $50 USD")
+    if agent.strategy not in STRATEGIES:
+        raise HTTPException(status_code=400, detail=f"Unknown strategy: {agent.strategy}")
+    if agent.max_leverage < 1 or agent.max_leverage > 125:
+        raise HTTPException(status_code=400, detail="Max leverage must be 1-125")
     
     existing = db.query(TradingAgent).filter(TradingAgent.name == agent.name).first()
     if existing:
@@ -93,7 +96,9 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         name=agent.name,
         initial_balance=agent.initial_balance,
         current_balance=agent.initial_balance,
-        status="active"
+        status="active",
+        strategy=agent.strategy,
+        max_leverage=agent.max_leverage,
     )
     db.add(new_agent)
     db.commit()
@@ -105,6 +110,8 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         "initial_balance": new_agent.initial_balance,
         "current_balance": new_agent.current_balance,
         "status": new_agent.status,
+        "strategy": new_agent.strategy,
+        "max_leverage": new_agent.max_leverage,
         "created_at": new_agent.created_at.isoformat()
     }
 
@@ -116,13 +123,17 @@ def list_agents(db: Session = Depends(get_db)):
     result = []
     
     for agent in agents:
-        # Calculate total portfolio value
+        # Calculate total portfolio value (unrealized PnL)
         portfolio_value = 0
         for item in agent.portfolio:
             current_price = market_service.get_coin_price(item.cryptocurrency)
             if current_price:
                 item.current_price = current_price
-                portfolio_value += item.amount * current_price
+                if item.position_type == "long":
+                    unrealized = item.amount * (current_price - item.avg_buy_price)
+                else:
+                    unrealized = item.amount * (item.avg_buy_price - current_price)
+                portfolio_value += item.margin + unrealized
         
         total_value = agent.current_balance + portfolio_value
         profit_loss = total_value - agent.initial_balance
@@ -138,6 +149,9 @@ def list_agents(db: Session = Depends(get_db)):
             "profit_loss": profit_loss,
             "profit_loss_pct": profit_loss_pct,
             "status": agent.status,
+            "strategy": agent.strategy,
+            "max_leverage": agent.max_leverage,
+            "open_positions": len([p for p in agent.portfolio if p.amount > 0]),
             "created_at": agent.created_at.isoformat(),
             "updated_at": agent.updated_at.isoformat()
         })
@@ -153,7 +167,7 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    # Update portfolio prices
+    # Update portfolio prices and calculate unrealized PnL
     portfolio_items = []
     portfolio_value = 0
     
@@ -161,9 +175,13 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         current_price = market_service.get_coin_price(item.cryptocurrency)
         if current_price:
             item.current_price = current_price
-            value = item.amount * current_price
-            portfolio_value += value
-            profit_loss = (current_price - item.avg_buy_price) * item.amount
+            if item.position_type == "long":
+                unrealized = item.amount * (current_price - item.avg_buy_price)
+            else:
+                unrealized = item.amount * (item.avg_buy_price - current_price)
+            position_equity = item.margin + unrealized
+            portfolio_value += position_equity
+            pnl_pct = (unrealized / item.margin * 100) if item.margin > 0 else 0
             
             portfolio_items.append({
                 "cryptocurrency": item.cryptocurrency,
@@ -171,9 +189,15 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
                 "amount": item.amount,
                 "avg_buy_price": item.avg_buy_price,
                 "current_price": current_price,
-                "value": value,
-                "profit_loss": profit_loss,
-                "profit_loss_pct": (profit_loss / (item.avg_buy_price * item.amount) * 100) if item.avg_buy_price > 0 else 0
+                "position_type": item.position_type,
+                "leverage": item.leverage,
+                "margin": item.margin,
+                "value": position_equity,
+                "profit_loss": unrealized,
+                "profit_loss_pct": pnl_pct,
+                "liquidation_price": item.liquidation_price,
+                "stop_loss_price": item.stop_loss_price,
+                "take_profit_price": item.take_profit_price,
             })
     
     total_value = agent.current_balance + portfolio_value
@@ -190,6 +214,8 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         "profit_loss": total_value - agent.initial_balance,
         "profit_loss_pct": ((total_value - agent.initial_balance) / agent.initial_balance * 100) if agent.initial_balance > 0 else 0,
         "status": agent.status,
+        "strategy": agent.strategy,
+        "max_leverage": agent.max_leverage,
         "portfolio": portfolio_items,
         "created_at": agent.created_at.isoformat()
     }
@@ -243,6 +269,8 @@ def get_agent_trades(agent_id: int, limit: int = 50, db: Session = Depends(get_d
         "price": t.price,
         "total_value": t.total_value,
         "profit_loss": t.profit_loss,
+        "leverage": t.leverage,
+        "margin": t.margin,
         "timestamp": t.timestamp.isoformat()
     } for t in trades]
 
@@ -263,6 +291,7 @@ def get_agent_decisions(agent_id: int, limit: int = 50, db: Session = Depends(ge
         "confidence": d.confidence,
         "indicators": d.indicators,
         "news_considered": d.news_considered,
+        "strategy": d.strategy,
         "timestamp": d.timestamp.isoformat()
     } for d in decisions]
 
@@ -283,6 +312,25 @@ def get_market_prices():
         {"id": coin, "current_price": price, "symbol": coin[:3].upper()}
         for coin, price in prices.items()
     ]}
+
+
+@app.get("/api/strategies")
+def get_strategies():
+    """Get all available trading strategies"""
+    return {
+        key: {
+            "key": cfg.key,
+            "name": cfg.name,
+            "description": cfg.description,
+            "style": cfg.style,
+            "default_leverage": cfg.default_leverage,
+            "max_leverage": cfg.max_leverage,
+            "max_positions": cfg.max_positions,
+            "risk_per_trade_pct": cfg.risk_per_trade_pct,
+            "min_confidence": cfg.min_confidence,
+        }
+        for key, cfg in STRATEGIES.items()
+    }
 
 
 @app.get("/api/market/{coin}")
@@ -395,7 +443,11 @@ async def run_trading_cycle():
                     for item in agent.portfolio:
                         price = market_service.get_coin_price(item.cryptocurrency)
                         if price:
-                            portfolio_value += item.amount * price
+                            if item.position_type == "long":
+                                unrealized = item.amount * (price - item.avg_buy_price)
+                            else:
+                                unrealized = item.amount * (item.avg_buy_price - price)
+                            portfolio_value += item.margin + unrealized
 
                     snapshot = PortfolioSnapshot(
                         agent_id=agent.id,

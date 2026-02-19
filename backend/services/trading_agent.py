@@ -1,416 +1,465 @@
 """
-AI Trading Agent - Makes intelligent trading decisions using real market data
+AI Trading Agent — Futures-capable with configurable strategies
+===============================================================
+Supports LONG and SHORT positions with leverage.
+Uses the StrategyEngine for signal generation and professional
+risk-based position sizing.
 """
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import random
 from datetime import datetime
 from sqlalchemy.orm import Session
 
 from backend.models.database import TradingAgent, Portfolio, Trade, Decision, NewsEvent
 from backend.services.market_data import MarketDataService
+from backend.services.strategies import (
+    StrategyEngine, Indicators, STRATEGIES,
+    calculate_position_size, calculate_liquidation_price, Signal
+)
 
 logger = logging.getLogger(__name__)
 
 
 class TradingAgentService:
-    """AI Trading Agent that makes autonomous trading decisions using real data"""
-    
+    """AI Trading Agent with futures support and configurable strategies."""
+
     def __init__(self, market_service: MarketDataService):
         self.market_service = market_service
-    
-    # ── Technical Analysis ────────────────────────────────────────────────
+        self.strategy_engine = StrategyEngine()
 
-    def _compute_rsi(self, prices: List[float], period: int = 14) -> Optional[float]:
-        """Compute RSI (Relative Strength Index)"""
-        if len(prices) < period + 1:
-            return None
-        
-        deltas = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
-        gains = [d if d > 0 else 0 for d in deltas]
-        losses = [-d if d < 0 else 0 for d in deltas]
-        
-        avg_gain = sum(gains[-period:]) / period
-        avg_loss = sum(losses[-period:]) / period
-        
-        if avg_loss == 0:
-            return 100.0
-        
-        rs = avg_gain / avg_loss
-        return 100.0 - (100.0 / (1.0 + rs))
+    # ── Main decision loop ────────────────────────────────────────────────
 
-    def _compute_sma(self, prices: List[float], period: int) -> Optional[float]:
-        """Simple Moving Average"""
-        if len(prices) < period:
-            return None
-        return sum(prices[-period:]) / period
+    def make_trading_decision(self, agent: TradingAgent, db: Session) -> Optional[Dict]:
+        """
+        Full decision cycle:
+        1. Check existing positions (liquidation, stop-loss, take-profit)
+        2. Scan all coins for the best new signal
+        3. Execute if signal is strong enough
+        """
+        try:
+            strategy_key = agent.strategy or "confluence_master"
+            strategy_cfg = STRATEGIES.get(strategy_key)
+            if not strategy_cfg:
+                logger.warning(f"Unknown strategy {strategy_key}, using confluence_master")
+                strategy_key = "confluence_master"
+                strategy_cfg = STRATEGIES["confluence_master"]
 
-    def _compute_ema(self, prices: List[float], period: int) -> Optional[float]:
-        """Exponential Moving Average"""
-        if len(prices) < period:
-            return None
-        
-        multiplier = 2 / (period + 1)
-        ema = sum(prices[:period]) / period  # Start with SMA
-        
-        for price in prices[period:]:
-            ema = (price - ema) * multiplier + ema
-        
-        return ema
+            # Step 1: Check existing positions for stop-loss / take-profit / liquidation
+            existing_positions = db.query(Portfolio).filter(
+                Portfolio.agent_id == agent.id,
+                Portfolio.amount > 0
+            ).all()
 
-    def _compute_macd(self, prices: List[float]) -> Optional[Dict]:
-        """MACD (12, 26, 9)"""
-        if len(prices) < 26:
-            return None
-        
-        ema12 = self._compute_ema(prices, 12)
-        ema26 = self._compute_ema(prices, 26)
-        
-        if ema12 is None or ema26 is None:
-            return None
-        
-        macd_line = ema12 - ema26
-        # Simplified signal line
-        return {
-            "macd": macd_line,
-            "signal": macd_line * 0.8,  # Approximation
-            "histogram": macd_line * 0.2
-        }
+            for pos in existing_positions:
+                close_decision = self._check_position(agent, pos, strategy_key, db)
+                if close_decision:
+                    return close_decision
 
-    def _compute_bollinger_bands(self, prices: List[float], period: int = 20) -> Optional[Dict]:
-        """Bollinger Bands"""
-        if len(prices) < period:
-            return None
-        
-        recent = prices[-period:]
-        sma = sum(recent) / period
-        std = (sum((p - sma) ** 2 for p in recent) / period) ** 0.5
-        
-        return {
-            "upper": sma + 2 * std,
-            "middle": sma,
-            "lower": sma - 2 * std,
-            "width": (4 * std / sma * 100) if sma > 0 else 0
-        }
+            # Step 2: If we haven't hit max positions, look for new signals
+            open_count = len(existing_positions)
+            if open_count >= strategy_cfg.max_positions:
+                return {
+                    "action": "hold",
+                    "coin": "—",
+                    "confidence": 0.0,
+                    "reasoning": f"Max positions reached ({open_count}/{strategy_cfg.max_positions})",
+                    "strategy": strategy_key,
+                }
 
-    def calculate_technical_indicators(self, coin: str) -> Dict:
-        """Calculate real technical indicators for decision making"""
-        market_data = self.market_service.get_market_data(coin)
-        if not market_data:
-            return {}
-        
-        current_price = market_data.get("current_price")
-        if not current_price:
-            return {}
-
-        # Get historical data for indicator calculations
-        historical = self.market_service.get_historical_prices(coin, days=30)
-        prices = [h["price"] for h in historical] if historical else []
-        
-        # Get OHLC for more detailed analysis
-        ohlc_data = self.market_service.get_ohlc(coin, days=14)
-        close_prices = [c["close"] for c in ohlc_data] if ohlc_data else prices
-        
-        # Build indicators dict
-        indicators = {
-            "current_price": current_price,
-            "price_change_24h": market_data.get("price_change_24h", 0) or 0,
-            "price_change_7d": market_data.get("price_change_7d", 0) or 0,
-            "volume_24h": market_data.get("volume_24h", 0) or 0,
-            "market_cap": market_data.get("market_cap", 0) or 0,
-            "high_24h": market_data.get("high_24h"),
-            "low_24h": market_data.get("low_24h"),
-        }
-
-        if len(close_prices) >= 2:
-            avg_7 = self._compute_sma(close_prices, min(7, len(close_prices)))
-            indicators["momentum"] = (
-                ((current_price - avg_7) / avg_7 * 100) if avg_7 and avg_7 > 0 else 0
+            # Step 3: Scan coins and pick the best signal
+            best_signal, best_coin = self._scan_for_best_signal(
+                agent, strategy_key, existing_positions, db
             )
 
-            mean = sum(close_prices) / len(close_prices)
-            variance = sum((p - mean) ** 2 for p in close_prices) / len(close_prices)
-            indicators["volatility"] = variance ** 0.5
-            indicators["avg_price_7d"] = avg_7 or mean
+            if best_signal and best_coin and best_signal.direction in ("long", "short"):
+                if best_signal.confidence >= strategy_cfg.min_confidence:
+                    decision = self._open_position(
+                        agent, best_coin, best_signal, strategy_key, db
+                    )
+                    return decision
+
+            # No actionable signal
+            coin_label = best_coin or "market"
+            reasoning = best_signal.reasoning if best_signal else "No clear signals detected"
+            self._log_decision(db, agent.id, coin_label, {
+                "action": "hold",
+                "reasoning": reasoning,
+                "confidence": best_signal.confidence if best_signal else 0.0,
+            }, {}, [], strategy_key)
+
+            return {
+                "action": "hold",
+                "coin": coin_label,
+                "confidence": best_signal.confidence if best_signal else 0.0,
+                "reasoning": reasoning,
+                "strategy": strategy_key,
+            }
+
+        except Exception as e:
+            logger.error(f"Error in trading decision for agent {agent.id}: {e}")
+            return None
+
+    # ── Position Checks (SL / TP / Liquidation) ───────────────────────────
+
+    def _check_position(self, agent: TradingAgent, pos: Portfolio,
+                        strategy_key: str, db: Session) -> Optional[Dict]:
+        """Check an existing position for liquidation, stop-loss, or take-profit."""
+        current_price = self.market_service.get_coin_price(pos.cryptocurrency)
+        if not current_price or current_price <= 0:
+            return None
+
+        pos.current_price = current_price
+
+        # 1. Liquidation check
+        if pos.leverage > 1 and pos.liquidation_price > 0:
+            liquidated = (
+                (pos.position_type == "long" and current_price <= pos.liquidation_price) or
+                (pos.position_type == "short" and current_price >= pos.liquidation_price)
+            )
+            if liquidated:
+                return self._close_position(
+                    agent, pos, current_price, db,
+                    reason=f"LIQUIDATED at ${current_price:.2f} (liq price: ${pos.liquidation_price:.2f})",
+                    force_loss=-pos.margin,
+                    strategy_key=strategy_key,
+                )
+
+        # 2. Stop-loss check
+        if pos.stop_loss_price > 0:
+            sl_hit = (
+                (pos.position_type == "long" and current_price <= pos.stop_loss_price) or
+                (pos.position_type == "short" and current_price >= pos.stop_loss_price)
+            )
+            if sl_hit:
+                return self._close_position(
+                    agent, pos, current_price, db,
+                    reason=f"Stop-loss hit at ${current_price:.2f} (SL: ${pos.stop_loss_price:.2f})",
+                    strategy_key=strategy_key,
+                )
+
+        # 3. Take-profit check
+        if pos.take_profit_price > 0:
+            tp_hit = (
+                (pos.position_type == "long" and current_price >= pos.take_profit_price) or
+                (pos.position_type == "short" and current_price <= pos.take_profit_price)
+            )
+            if tp_hit:
+                return self._close_position(
+                    agent, pos, current_price, db,
+                    reason=f"Take-profit hit at ${current_price:.2f} (TP: ${pos.take_profit_price:.2f})",
+                    strategy_key=strategy_key,
+                )
+
+        # 4. Strategy-based close signal
+        indicators = self._compute_indicators(pos.cryptocurrency)
+        if indicators:
+            signal = self.strategy_engine.evaluate(
+                strategy_key, indicators, current_price,
+                has_long=(pos.position_type == "long"),
+                has_short=(pos.position_type == "short"),
+                entry_price=pos.avg_buy_price,
+            )
+            if signal.direction in ("close_long", "close_short"):
+                return self._close_position(
+                    agent, pos, current_price, db,
+                    reason=signal.reasoning,
+                    strategy_key=strategy_key,
+                )
+
+        return None
+
+    # ── Scan for Best Signal ──────────────────────────────────────────────
+
+    def _scan_for_best_signal(
+        self, agent: TradingAgent, strategy_key: str,
+        existing_positions: List[Portfolio], db: Session
+    ) -> tuple:
+        """Scan all coins and return the best signal + coin."""
+        existing_coins = {p.cryptocurrency for p in existing_positions}
+        best_signal: Optional[Signal] = None
+        best_coin: Optional[str] = None
+
+        # Get market activity for prioritization
+        all_market = self.market_service.get_all_market_data()
+        coins_to_scan = []
+
+        if all_market:
+            scored = []
+            for coin in all_market:
+                coin_id = coin.get("id", "")
+                if coin_id in existing_coins:
+                    continue
+                change = abs(coin.get("price_change_24h") or 0)
+                scored.append((coin_id, change))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            coins_to_scan = [c[0] for c in scored]
         else:
-            indicators["momentum"] = 0
-            indicators["volatility"] = 0
-            indicators["avg_price_7d"] = current_price
+            coins_to_scan = [c for c in self.market_service.supported_coins
+                           if c not in existing_coins]
 
-        # RSI
-        rsi = self._compute_rsi(close_prices)
-        indicators["rsi"] = rsi
+        # Evaluate top coins
+        for coin in coins_to_scan[:6]:
+            indicators = self._compute_indicators(coin)
+            if not indicators:
+                continue
 
-        # MACD
-        macd = self._compute_macd(close_prices)
-        indicators["macd"] = macd
+            current_price = indicators.get("current_price", 0)
+            if current_price <= 0:
+                continue
 
-        # Bollinger Bands
-        bb = self._compute_bollinger_bands(close_prices)
-        indicators["bollinger"] = bb
+            signal = self.strategy_engine.evaluate(
+                strategy_key, indicators, current_price,
+                has_long=False, has_short=False, entry_price=0.0
+            )
 
-        # SMA crossover signals
-        sma_short = self._compute_sma(close_prices, 7)
-        sma_long = self._compute_sma(close_prices, 21)
-        if sma_short and sma_long:
-            indicators["sma_7"] = sma_short
-            indicators["sma_21"] = sma_long
-            indicators["sma_crossover"] = "bullish" if sma_short > sma_long else "bearish"
+            # Factor in news sentiment
+            sentiment = self._get_news_sentiment(coin, db)
+            if sentiment != 0:
+                self._adjust_signal_for_sentiment(signal, sentiment)
+
+            if signal.direction in ("long", "short"):
+                if best_signal is None or signal.confidence > best_signal.confidence:
+                    best_signal = signal
+                    best_coin = coin
+
+        return best_signal, best_coin
+
+    # ── Indicator Computation ─────────────────────────────────────────────
+
+    def _compute_indicators(self, coin: str) -> Optional[Dict]:
+        """Compute all technical indicators for a coin."""
+        market_data = self.market_service.get_market_data(coin)
+        if not market_data:
+            return None
+
+        current_price = market_data.get("current_price")
+        if not current_price:
+            return None
+
+        # Get OHLC data (need at least 55+ bars for EMA-55)
+        ohlc = self.market_service.get_ohlc(coin, days=90)
+        if not ohlc or len(ohlc) < 15:
+            ohlc = self.market_service.get_ohlc(coin, days=30)
+
+        close_prices = [c["close"] for c in ohlc] if ohlc else []
+
+        if len(close_prices) < 15:
+            historical = self.market_service.get_historical_prices(coin, days=30)
+            if historical:
+                close_prices = [h["price"] for h in historical]
+
+        if len(close_prices) < 15:
+            return None
+
+        # Compute all indicators
+        indicators = Indicators.compute_all(close_prices, ohlc or [], current_price)
+
+        # Add market context
+        indicators["price_change_24h"] = market_data.get("price_change_24h", 0) or 0
+        indicators["price_change_7d"] = market_data.get("price_change_7d", 0) or 0
+        indicators["volume_24h"] = market_data.get("volume_24h", 0) or 0
+        indicators["market_cap"] = market_data.get("market_cap", 0) or 0
 
         return indicators
 
-    # ── Coin Selection ────────────────────────────────────────────────────
+    # ── News Sentiment ────────────────────────────────────────────────────
 
-    def _select_coin_to_analyze(self) -> str:
-        """
-        Select a coin to analyze based on market activity.
-        Prioritize coins with highest 24h price change (either direction = opportunity).
-        """
-        all_market = self.market_service.get_all_market_data()
-        
-        if not all_market:
-            # Fallback to random from supported list
-            return random.choice(self.market_service.supported_coins)
+    def _get_news_sentiment(self, coin: str, db: Session) -> float:
+        recent_news = db.query(NewsEvent).filter(
+            NewsEvent.cryptocurrency == coin
+        ).order_by(NewsEvent.timestamp.desc()).limit(5).all()
 
-        # Sort by absolute price change (most volatile = most opportunity)
-        scored = []
-        for coin in all_market:
-            change = abs(coin.get("price_change_24h") or 0)
-            volume = coin.get("volume_24h") or 0
-            scored.append((coin["id"], change, volume))
+        if not recent_news:
+            return 0.0
 
-        # Weighted random selection favoring high-activity coins
-        scored.sort(key=lambda x: x[1], reverse=True)
-        
-        # Top half gets higher probability
-        weights = [2.0 if i < len(scored) / 2 else 1.0 for i in range(len(scored))]
-        total = sum(weights)
-        weights = [w / total for w in weights]
-        
-        r = random.random()
-        cumulative = 0
-        for i, w in enumerate(weights):
-            cumulative += w
-            if r <= cumulative:
-                return scored[i][0]
-        
-        return scored[0][0]
+        return sum(n.impact_score for n in recent_news) / len(recent_news)
 
-    # ── Decision Making ───────────────────────────────────────────────────
-    
-    def make_trading_decision(self, agent: TradingAgent, db: Session) -> Optional[Dict]:
-        """
-        AI decision making process:
-        1. Select the most interesting coin to analyze
-        2. Calculate real technical indicators
-        3. Check portfolio
-        4. Consider real news sentiment
-        5. Make buy/sell/hold decision
-        """
-        try:
-            coin = self._select_coin_to_analyze()
-            
-            indicators = self.calculate_technical_indicators(coin)
-            if not indicators:
-                return None
-            
-            current_price = indicators.get("current_price", 0)
-            if current_price == 0:
-                return None
-            
-            portfolio_item = db.query(Portfolio).filter(
-                Portfolio.agent_id == agent.id,
-                Portfolio.cryptocurrency == coin
-            ).first()
-            
-            # Get real news sentiment
-            recent_news = db.query(NewsEvent).filter(
-                NewsEvent.cryptocurrency == coin
-            ).order_by(NewsEvent.timestamp.desc()).limit(5).all()
-            
-            avg_sentiment_score = 0
-            if recent_news:
-                scores = []
-                for n in recent_news:
-                    scores.append(n.impact_score)
-                avg_sentiment_score = sum(scores) / len(scores)
-            
-            # AI Decision Logic with real indicators
-            decision = self._analyze_and_decide(
-                agent, coin, indicators, portfolio_item, avg_sentiment_score, current_price
-            )
-            
-            if decision:
-                self._log_decision(db, agent.id, coin, decision, indicators, recent_news)
-                
-                if decision["action"] in ["buy", "sell"]:
-                    self._execute_trade(db, agent, coin, decision, current_price)
-            
-            return decision
-            
-        except Exception as e:
-            logger.error(f"Error in trading decision: {e}")
-            return None
-    
-    def _analyze_and_decide(
-        self, 
-        agent: TradingAgent, 
-        coin: str, 
-        indicators: Dict, 
-        portfolio_item: Optional[Portfolio],
-        sentiment_score: float,
-        current_price: float
+    def _adjust_signal_for_sentiment(self, signal: Signal, sentiment: float):
+        if signal.direction == "long" and sentiment > 0.1:
+            signal.confidence = min(signal.confidence + 0.05, 0.95)
+            signal.reasoning += f"; Positive news (+{sentiment:.2f})"
+        elif signal.direction == "long" and sentiment < -0.1:
+            signal.confidence = max(signal.confidence - 0.05, 0.0)
+            signal.reasoning += f"; ⚠ Negative news ({sentiment:.2f})"
+        elif signal.direction == "short" and sentiment < -0.1:
+            signal.confidence = min(signal.confidence + 0.05, 0.95)
+            signal.reasoning += f"; Negative news confirms ({sentiment:.2f})"
+        elif signal.direction == "short" and sentiment > 0.1:
+            signal.confidence = max(signal.confidence - 0.05, 0.0)
+            signal.reasoning += f"; ⚠ Positive news conflicts (+{sentiment:.2f})"
+
+    # ── Open Position ─────────────────────────────────────────────────────
+
+    def _open_position(
+        self, agent: TradingAgent, coin: str,
+        signal: Signal, strategy_key: str, db: Session
     ) -> Dict:
-        """Core AI logic using real technical indicators"""
-        
-        momentum = indicators.get("momentum", 0)
-        price_change_24h = indicators.get("price_change_24h", 0)
-        rsi = indicators.get("rsi")
-        macd = indicators.get("macd")
-        bb = indicators.get("bollinger")
-        sma_crossover = indicators.get("sma_crossover")
-        
-        buy_score = 0
-        sell_score = 0
-        reasons = []
-        
-        # ── RSI signals ──
-        if rsi is not None:
-            if rsi < 30:
-                buy_score += 3
-                reasons.append(f"RSI oversold ({rsi:.1f})")
-            elif rsi < 40:
-                buy_score += 1
-                reasons.append(f"RSI low ({rsi:.1f})")
-            elif rsi > 70:
-                sell_score += 3
-                reasons.append(f"RSI overbought ({rsi:.1f})")
-            elif rsi > 60:
-                sell_score += 1
-                reasons.append(f"RSI high ({rsi:.1f})")
+        """Open a LONG or SHORT futures position."""
+        current_price = self.market_service.get_coin_price(coin) or 0
+        if current_price <= 0:
+            return {"action": "hold", "coin": coin, "confidence": 0,
+                    "reasoning": "Price unavailable", "strategy": strategy_key}
 
-        # ── MACD signals ──
-        if macd:
-            if macd["histogram"] > 0:
-                buy_score += 1
-                reasons.append("MACD bullish")
-            else:
-                sell_score += 1
-                reasons.append("MACD bearish")
+        leverage = min(signal.leverage, agent.max_leverage)
 
-        # ── Bollinger Band signals ──
-        if bb:
-            if current_price <= bb["lower"]:
-                buy_score += 2
-                reasons.append("Price at lower Bollinger Band")
-            elif current_price >= bb["upper"]:
-                sell_score += 2
-                reasons.append("Price at upper Bollinger Band")
+        margin = calculate_position_size(
+            agent.current_balance, strategy_key, leverage,
+            signal.stop_loss_pct, current_price
+        )
 
-        # ── SMA crossover ──
-        if sma_crossover == "bullish":
-            buy_score += 1
-            reasons.append("SMA 7/21 bullish crossover")
-        elif sma_crossover == "bearish":
-            sell_score += 1
-            reasons.append("SMA 7/21 bearish crossover")
-        
-        # ── Momentum ──
-        if momentum > 5:
-            buy_score += 2
-            reasons.append(f"Strong momentum (+{momentum:.1f}%)")
-        elif momentum > 2:
-            buy_score += 1
-        elif momentum < -5:
-            sell_score += 2
-            reasons.append(f"Negative momentum ({momentum:.1f}%)")
-        elif momentum < -2:
-            sell_score += 1
-        
-        # ── 24h price change ──
-        if price_change_24h > 5:
-            buy_score += 1
-        elif price_change_24h < -5:
-            sell_score += 1
-        
-        # ── News sentiment ──
-        if sentiment_score > 0.1:
-            buy_score += 1
-            reasons.append(f"Positive news sentiment ({sentiment_score:.2f})")
-        elif sentiment_score < -0.1:
-            sell_score += 1
-            reasons.append(f"Negative news sentiment ({sentiment_score:.2f})")
-        
-        # ── Portfolio management ──
-        has_position = portfolio_item is not None and portfolio_item.amount > 0
-        
-        if has_position and portfolio_item.avg_buy_price > 0:
-            profit_pct = ((current_price - portfolio_item.avg_buy_price) / portfolio_item.avg_buy_price * 100)
-            
-            if profit_pct > 10:
-                sell_score += 3
-                reasons.append(f"Take profit ({profit_pct:.1f}%)")
-            elif profit_pct > 5:
-                sell_score += 1
-                reasons.append(f"Moderate profit ({profit_pct:.1f}%)")
-            elif profit_pct < -5:
-                sell_score += 2
-                reasons.append(f"Stop loss ({profit_pct:.1f}%)")
-        
-        max_investment = agent.current_balance * 0.2
-        reasoning = "; ".join(reasons) if reasons else "Market conditions unclear"
-        
-        # ── Final decision ──
-        if buy_score > sell_score and buy_score >= 3 and not has_position:
-            if agent.current_balance > 50:
-                confidence = min(buy_score / 8, 0.95)
-                amount_to_invest = min(agent.current_balance * 0.1, max_investment)
-                
-                return {
-                    "action": "buy",
-                    "coin": coin,
-                    "amount_usd": amount_to_invest,
-                    "confidence": round(confidence, 2),
-                    "reasoning": f"BUY {coin}: {reasoning}",
-                    "buy_score": buy_score,
-                    "sell_score": sell_score,
-                }
-        
-        elif sell_score > buy_score and sell_score >= 3 and has_position:
-            confidence = min(sell_score / 8, 0.95)
-            
-            return {
-                "action": "sell",
-                "coin": coin,
-                "amount": portfolio_item.amount,
-                "confidence": round(confidence, 2),
-                "reasoning": f"SELL {coin}: {reasoning}",
-                "buy_score": buy_score,
-                "sell_score": sell_score,
-            }
-        
+        if margin <= 0 or margin > agent.current_balance:
+            return {"action": "hold", "coin": coin, "confidence": signal.confidence,
+                    "reasoning": f"Insufficient margin (need ${margin:.2f}, have ${agent.current_balance:.2f})",
+                    "strategy": strategy_key}
+
+        position_value = margin * leverage
+        amount_coins = position_value / current_price
+        direction = signal.direction
+
+        liq_price = calculate_liquidation_price(current_price, leverage, direction)
+
+        if direction == "long":
+            sl_price = current_price * (1 - signal.stop_loss_pct / 100)
+            tp_price = current_price * (1 + signal.take_profit_pct / 100)
+        else:
+            sl_price = current_price * (1 + signal.stop_loss_pct / 100)
+            tp_price = current_price * (1 - signal.take_profit_pct / 100)
+
+        market_data = self.market_service.get_market_data(coin)
+        symbol = (market_data.get("symbol", coin[:3]).upper()
+                  if market_data else coin[:3].upper())
+
+        agent.current_balance -= margin
+
+        portfolio_item = Portfolio(
+            agent_id=agent.id,
+            cryptocurrency=coin,
+            symbol=symbol,
+            amount=amount_coins,
+            avg_buy_price=current_price,
+            current_price=current_price,
+            position_type=direction,
+            leverage=leverage,
+            margin=margin,
+            liquidation_price=liq_price,
+            stop_loss_price=sl_price,
+            take_profit_price=tp_price,
+        )
+        db.add(portfolio_item)
+
+        trade = Trade(
+            agent_id=agent.id,
+            cryptocurrency=coin,
+            symbol=symbol,
+            trade_type=f"open_{direction}",
+            amount=amount_coins,
+            price=current_price,
+            total_value=position_value,
+            profit_loss=0,
+            leverage=leverage,
+            margin=margin,
+        )
+        db.add(trade)
+
+        self._log_decision(db, agent.id, coin, {
+            "action": direction,
+            "reasoning": signal.reasoning,
+            "confidence": signal.confidence,
+        }, {}, [], strategy_key)
+
+        db.commit()
+
+        tag = "LONG" if direction == "long" else "SHORT"
+        logger.info(
+            f"Agent {agent.name}: {tag} {coin} — margin ${margin:.2f} "
+            f"× {leverage}x = ${position_value:.2f} @ ${current_price:.2f} "
+            f"(SL: ${sl_price:.2f} | TP: ${tp_price:.2f})"
+        )
+
         return {
-            "action": "hold",
+            "action": direction,
             "coin": coin,
-            "confidence": 0.5,
-            "reasoning": f"HOLD {coin}: {reasoning} (buy={buy_score}, sell={sell_score})",
-            "buy_score": buy_score,
-            "sell_score": sell_score,
+            "confidence": signal.confidence,
+            "reasoning": signal.reasoning,
+            "strategy": strategy_key,
+            "leverage": leverage,
+            "margin": margin,
+            "position_value": position_value,
         }
-    
+
+    # ── Close Position ────────────────────────────────────────────────────
+
+    def _close_position(
+        self, agent: TradingAgent, pos: Portfolio,
+        current_price: float, db: Session,
+        reason: str = "", force_loss: Optional[float] = None,
+        strategy_key: str = ""
+    ) -> Dict:
+        """Close an existing LONG or SHORT position."""
+        if force_loss is not None:
+            pnl = force_loss
+        elif pos.position_type == "long":
+            pnl = pos.amount * (current_price - pos.avg_buy_price)
+        else:
+            pnl = pos.amount * (pos.avg_buy_price - current_price)
+
+        cash_return = max(pos.margin + pnl, 0)
+        agent.current_balance += cash_return
+
+        trade_type = f"close_{pos.position_type}"
+
+        trade = Trade(
+            agent_id=agent.id,
+            cryptocurrency=pos.cryptocurrency,
+            symbol=pos.symbol,
+            trade_type=trade_type,
+            amount=pos.amount,
+            price=current_price,
+            total_value=pos.amount * current_price,
+            profit_loss=pnl,
+            leverage=pos.leverage,
+            margin=pos.margin,
+        )
+        db.add(trade)
+
+        self._log_decision(db, agent.id, pos.cryptocurrency, {
+            "action": trade_type,
+            "reasoning": reason,
+            "confidence": 0.9,
+        }, {}, [], strategy_key)
+
+        db.delete(pos)
+        db.commit()
+
+        tag = pos.position_type.upper()
+        logger.info(
+            f"Agent {agent.name}: CLOSE {tag} {pos.cryptocurrency} — "
+            f"PnL: ${pnl:.2f} (margin: ${pos.margin:.2f} → returned ${cash_return:.2f}) "
+            f"| {reason}"
+        )
+
+        return {
+            "action": trade_type,
+            "coin": pos.cryptocurrency,
+            "confidence": 0.9,
+            "reasoning": reason,
+            "strategy": strategy_key,
+            "profit_loss": pnl,
+            "leverage": pos.leverage,
+        }
+
+    # ── Decision Logging ──────────────────────────────────────────────────
+
     def _log_decision(
-        self, 
-        db: Session, 
-        agent_id: int, 
-        coin: str, 
-        decision: Dict, 
-        indicators: Dict,
-        news: List
+        self, db: Session, agent_id: int, coin: str,
+        decision: Dict, indicators: Dict,
+        news: List, strategy_key: str = ""
     ):
-        """Log AI decision to database"""
-        news_data = [{"title": n.title, "sentiment": n.sentiment} for n in news[:3]] if news else None
-        
-        # Sanitize indicators for JSON storage (remove non‑serializable objects)
+        """Log AI decision to database."""
+        news_data = ([{"title": n.title, "sentiment": n.sentiment}
+                      for n in news[:3]] if news and hasattr(news[0] if news else None, 'title') else None)
+
         safe_indicators = {}
         for k, v in indicators.items():
             if isinstance(v, (int, float, str, bool, type(None))):
@@ -420,108 +469,17 @@ class TradingAgentService:
                     sk: sv for sk, sv in v.items()
                     if isinstance(sv, (int, float, str, bool, type(None)))
                 }
-        
-        decision_log = Decision(
+
+        log = Decision(
             agent_id=agent_id,
             decision_type="analysis",
             cryptocurrency=coin,
-            reasoning=decision["reasoning"],
+            reasoning=decision.get("reasoning", ""),
             indicators=safe_indicators,
             news_considered=news_data,
-            action_taken=decision["action"],
-            confidence=decision["confidence"]
+            action_taken=decision.get("action", "hold"),
+            confidence=decision.get("confidence", 0.0),
+            strategy=strategy_key,
         )
-        db.add(decision_log)
-        db.commit()
-    
-    def _execute_trade(
-        self, 
-        db: Session, 
-        agent: TradingAgent, 
-        coin: str, 
-        decision: Dict, 
-        current_price: float
-    ):
-        """Execute a buy or sell trade"""
-        market_data = self.market_service.get_market_data(coin)
-        symbol = market_data.get("symbol", coin[:3].upper()) if market_data else coin[:3].upper()
-        
-        if decision["action"] == "buy":
-            amount_usd = decision["amount_usd"]
-            amount_coin = amount_usd / current_price
-            
-            # Update agent balance
-            agent.current_balance -= amount_usd
-            
-            # Update or create portfolio item
-            portfolio_item = db.query(Portfolio).filter(
-                Portfolio.agent_id == agent.id,
-                Portfolio.cryptocurrency == coin
-            ).first()
-            
-            if portfolio_item:
-                # Update existing position
-                total_value = (portfolio_item.amount * portfolio_item.avg_buy_price) + amount_usd
-                portfolio_item.amount += amount_coin
-                portfolio_item.avg_buy_price = total_value / portfolio_item.amount
-                portfolio_item.current_price = current_price
-            else:
-                # Create new position
-                portfolio_item = Portfolio(
-                    agent_id=agent.id,
-                    cryptocurrency=coin,
-                    symbol=symbol,
-                    amount=amount_coin,
-                    avg_buy_price=current_price,
-                    current_price=current_price
-                )
-                db.add(portfolio_item)
-            
-            # Create trade record
-            trade = Trade(
-                agent_id=agent.id,
-                cryptocurrency=coin,
-                symbol=symbol,
-                trade_type="buy",
-                amount=amount_coin,
-                price=current_price,
-                total_value=amount_usd,
-                profit_loss=0
-            )
-            db.add(trade)
-            
-        elif decision["action"] == "sell":
-            portfolio_item = db.query(Portfolio).filter(
-                Portfolio.agent_id == agent.id,
-                Portfolio.cryptocurrency == coin
-            ).first()
-            
-            if portfolio_item and portfolio_item.amount > 0:
-                amount_coin = decision["amount"]
-                sell_value = amount_coin * current_price
-                profit_loss = (current_price - portfolio_item.avg_buy_price) * amount_coin
-                
-                # Update agent balance
-                agent.current_balance += sell_value
-                
-                # Update portfolio
-                portfolio_item.amount -= amount_coin
-                if portfolio_item.amount < 0.0001:  # Close position if negligible
-                    db.delete(portfolio_item)
-                else:
-                    portfolio_item.current_price = current_price
-                
-                # Create trade record
-                trade = Trade(
-                    agent_id=agent.id,
-                    cryptocurrency=coin,
-                    symbol=symbol,
-                    trade_type="sell",
-                    amount=amount_coin,
-                    price=current_price,
-                    total_value=sell_value,
-                    profit_loss=profit_loss
-                )
-                db.add(trade)
-        
+        db.add(log)
         db.commit()
