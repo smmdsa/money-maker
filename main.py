@@ -10,6 +10,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import logging
 import asyncio
+import threading
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -39,6 +40,12 @@ backtester = Backtester()
 
 # Scheduler for background tasks
 scheduler = AsyncIOScheduler()
+
+# Global lock: serializes ALL trading/risk operations so the trading cycle
+# (60s) and risk monitor (5s) never modify agent balances concurrently.
+# Both threads MUST hold this lock before reading or writing any agent
+# balance or portfolio data.
+_trading_lock = threading.Lock()
 
 # WebSocket connections manager
 class ConnectionManager:
@@ -575,6 +582,9 @@ async def run_risk_monitor():
     Only checks SL/TP/liquidation on open positions — no indicators, no strategies.
     """
     def _sync_risk_check():
+        if not _trading_lock.acquire(blocking=False):
+            # Trading cycle is running — skip this tick, we'll check in 5s
+            return []
         try:
             db = next(get_db())
             actions = trading_service.check_risk_all_agents(db)
@@ -583,6 +593,8 @@ async def run_risk_monitor():
         except Exception as e:
             logger.error(f"Risk monitor error: {e}")
             return []
+        finally:
+            _trading_lock.release()
 
     actions = await asyncio.to_thread(_sync_risk_check)
 
@@ -604,52 +616,53 @@ async def run_trading_cycle():
 
     def _sync_trading_cycle():
         """Synchronous work executed in a thread pool."""
-        try:
-            db = next(get_db())
+        with _trading_lock:
+            try:
+                db = next(get_db())
 
-            # Fetch real news from APIs
-            news_service.fetch_and_store_news(db)
+                # Fetch real news from APIs
+                news_service.fetch_and_store_news(db)
 
-            # Get all active agents
-            agents = db.query(TradingAgent).filter(TradingAgent.status == "active").all()
+                # Get all active agents
+                agents = db.query(TradingAgent).filter(TradingAgent.status == "active").all()
 
-            decisions_made = []
-            for agent in agents:
-                try:
-                    # Make trading decision
-                    decision = trading_service.make_trading_decision(agent, db)
-                    if decision:
-                        decisions_made.append((agent.id, agent.name, decision))
+                decisions_made = []
+                for agent in agents:
+                    try:
+                        # Make trading decision
+                        decision = trading_service.make_trading_decision(agent, db)
+                        if decision:
+                            decisions_made.append((agent.id, agent.name, decision))
 
-                    # Record portfolio snapshot for equity curve
-                    portfolio_value = 0
-                    for item in agent.portfolio:
-                        price = market_service.get_coin_price(item.cryptocurrency)
-                        if price:
-                            if item.position_type == "long":
-                                unrealized = item.amount * (price - item.avg_buy_price)
-                            else:
-                                unrealized = item.amount * (item.avg_buy_price - price)
-                            portfolio_value += item.margin + unrealized
+                        # Record portfolio snapshot for equity curve
+                        portfolio_value = 0
+                        for item in agent.portfolio:
+                            price = market_service.get_coin_price(item.cryptocurrency)
+                            if price:
+                                if item.position_type == "long":
+                                    unrealized = item.amount * (price - item.avg_buy_price)
+                                else:
+                                    unrealized = item.amount * (item.avg_buy_price - price)
+                                portfolio_value += item.margin + unrealized
 
-                    snapshot = PortfolioSnapshot(
-                        agent_id=agent.id,
-                        total_value=agent.current_balance + portfolio_value,
-                        cash_balance=agent.current_balance,
-                        portfolio_value=portfolio_value
-                    )
-                    db.add(snapshot)
+                        snapshot = PortfolioSnapshot(
+                            agent_id=agent.id,
+                            total_value=agent.current_balance + portfolio_value,
+                            cash_balance=agent.current_balance,
+                            portfolio_value=portfolio_value
+                        )
+                        db.add(snapshot)
 
-                except Exception as e:
-                    logger.error(f"Error processing agent {agent.id}: {e}")
+                    except Exception as e:
+                        logger.error(f"Error processing agent {agent.id}: {e}")
 
-            db.commit()
-            db.close()
-            return decisions_made
+                db.commit()
+                db.close()
+                return decisions_made
 
-        except Exception as e:
-            logger.error(f"Error in trading cycle: {e}")
-            return []
+            except Exception as e:
+                logger.error(f"Error in trading cycle: {e}")
+                return []
 
     # Run all blocking I/O in a thread so we don't block the event loop
     decisions = await asyncio.to_thread(_sync_trading_cycle)
@@ -673,6 +686,89 @@ def health_check():
         "market_service": market_service.health_check(),
         "llm_service": llm_service.health_check(),
         "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+# ── Balance Repair ────────────────────────────────────────────────────────
+
+def _repair_agent_balances():
+    """Replay all trades to detect and fix agent balances corrupted by
+    past race conditions between the trading-cycle and risk-monitor threads.
+    Safe to run on every startup — it only touches agents whose computed
+    balance diverges from the stored value.
+    """
+    db = next(get_db())
+    try:
+        agents = db.query(TradingAgent).all()
+        for agent in agents:
+            trades = db.query(Trade).filter(
+                Trade.agent_id == agent.id
+            ).order_by(Trade.timestamp.asc(), Trade.id.asc()).all()
+
+            balance = agent.initial_balance
+            for t in trades:
+                if t.trade_type.startswith("open_"):
+                    balance -= t.margin
+                else:
+                    balance += max(t.margin + t.profit_loss, 0)
+
+            diff = abs(balance - agent.current_balance)
+            if diff > 0.01:
+                logger.warning(
+                    f"Balance repair: {agent.name} — "
+                    f"stored ${agent.current_balance:.4f} → "
+                    f"correct ${balance:.4f} (Δ ${diff:.2f})"
+                )
+                agent.current_balance = balance
+
+        db.commit()
+    except Exception as e:
+        logger.error(f"Balance repair failed: {e}")
+    finally:
+        db.close()
+
+
+@app.post("/api/repair-balances")
+def repair_balances_endpoint(db: Session = Depends(get_db)):
+    """Manually trigger balance repair for all agents."""
+    agents = db.query(TradingAgent).all()
+    results = []
+
+    for agent in agents:
+        trades = db.query(Trade).filter(
+            Trade.agent_id == agent.id
+        ).order_by(Trade.timestamp.asc(), Trade.id.asc()).all()
+
+        balance = agent.initial_balance
+        for t in trades:
+            if t.trade_type.startswith("open_"):
+                balance -= t.margin
+            else:
+                balance += max(t.margin + t.profit_loss, 0)
+
+        diff = abs(balance - agent.current_balance)
+        if diff > 0.01:
+            results.append({
+                "agent": agent.name,
+                "old_balance": round(agent.current_balance, 4),
+                "correct_balance": round(balance, 4),
+                "difference": round(diff, 2),
+                "status": "repaired",
+            })
+            agent.current_balance = balance
+        else:
+            results.append({
+                "agent": agent.name,
+                "balance": round(agent.current_balance, 4),
+                "status": "ok",
+            })
+
+    db.commit()
+    repaired = [r for r in results if r["status"] == "repaired"]
+    return {
+        "total_agents": len(results),
+        "repaired": len(repaired),
+        "details": results,
     }
 
 
@@ -776,6 +872,9 @@ async def startup_event():
     
     # Initialize database
     init_db()
+
+    # Repair any agent balances corrupted by past race conditions
+    _repair_agent_balances()
     
     # Start background scheduler
     scheduler.add_job(run_trading_cycle, 'interval', seconds=60, id='trading_cycle')

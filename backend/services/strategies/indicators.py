@@ -1,9 +1,68 @@
 """
 Technical Indicator Library.
 Stateless computations used by all strategies.
+
+SCALP_PROFILES provides timeframe-specific indicator periods
+for scalper variants (1m, 3m, 5m, 15m, 1h).
 """
 import math
 from typing import Dict, List, Optional
+
+
+# ── Scalper indicator profiles (timeframe-optimized periods) ─────────────
+
+SCALP_PROFILES: Dict[str, Dict] = {
+    "scalper_1m": {
+        "rsi_period": 7,
+        "macd_fast": 5, "macd_slow": 13, "macd_signal": 4,
+        "bb_period": 10, "bb_std": 1.8,
+        "atr_period": 10, "adx_period": 10,
+        "stoch_rsi_period": 7, "stoch_k_smooth": 3,
+        "ema_short": 5, "ema_mid": 13, "ema_long": 21,
+        "sma_fast": 5, "sma_mid": 13, "sma_slow": 21,
+        "vol_recent": 3, "vol_older": 8,
+    },
+    "scalper_3m": {
+        "rsi_period": 9,
+        "macd_fast": 8, "macd_slow": 17, "macd_signal": 6,
+        "bb_period": 14, "bb_std": 2.0,
+        "atr_period": 10, "adx_period": 10,
+        "stoch_rsi_period": 9, "stoch_k_smooth": 3,
+        "ema_short": 7, "ema_mid": 17, "ema_long": 34,
+        "sma_fast": 5, "sma_mid": 14, "sma_slow": 30,
+        "vol_recent": 4, "vol_older": 10,
+    },
+    "scalper_5m": {
+        "rsi_period": 10,
+        "macd_fast": 8, "macd_slow": 21, "macd_signal": 7,
+        "bb_period": 16, "bb_std": 2.0,
+        "atr_period": 12, "adx_period": 12,
+        "stoch_rsi_period": 10, "stoch_k_smooth": 3,
+        "ema_short": 8, "ema_mid": 21, "ema_long": 50,
+        "sma_fast": 7, "sma_mid": 21, "sma_slow": 50,
+        "vol_recent": 5, "vol_older": 12,
+    },
+    "scalper_15m": {
+        "rsi_period": 12,
+        "macd_fast": 10, "macd_slow": 22, "macd_signal": 8,
+        "bb_period": 18, "bb_std": 2.0,
+        "atr_period": 14, "adx_period": 14,
+        "stoch_rsi_period": 12, "stoch_k_smooth": 3,
+        "ema_short": 9, "ema_mid": 21, "ema_long": 50,
+        "sma_fast": 7, "sma_mid": 21, "sma_slow": 50,
+        "vol_recent": 5, "vol_older": 15,
+    },
+    "scalper": {  # 1h
+        "rsi_period": 14,
+        "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
+        "bb_period": 20, "bb_std": 2.0,
+        "atr_period": 14, "adx_period": 14,
+        "stoch_rsi_period": 14, "stoch_k_smooth": 3,
+        "ema_short": 9, "ema_mid": 21, "ema_long": 55,
+        "sma_fast": 7, "sma_mid": 21, "sma_slow": 50,
+        "vol_recent": 5, "vol_older": 15,
+    },
+}
 
 
 class Indicators:
@@ -263,18 +322,23 @@ class Indicators:
     # ── Volume Analysis ─────────────────────────────────────────────────
 
     @staticmethod
-    def volume_analysis(ohlc: List[Dict]) -> Optional[Dict]:
+    def volume_analysis(ohlc: List[Dict], recent_n: int = 5,
+                        older_n: int = 10) -> Optional[Dict]:
         """Analyze volume trend and detect surges."""
         volumes = [bar.get("volume", 0) for bar in ohlc]
         if not any(v > 0 for v in volumes):
             return None
 
-        recent_5 = volumes[-5:] if len(volumes) >= 5 else volumes
-        older_10 = (volumes[-15:-5] if len(volumes) >= 15
-                    else volumes[:max(len(volumes) - 5, 1)])
+        recent = volumes[-recent_n:] if len(volumes) >= recent_n else volumes
+        if len(volumes) >= recent_n + older_n:
+            older = volumes[-(recent_n + older_n):-recent_n]
+        elif len(volumes) > recent_n:
+            older = volumes[:-recent_n]
+        else:
+            older = volumes[:max(1, len(volumes) // 2)]
 
-        avg_recent = sum(recent_5) / len(recent_5) if recent_5 else 1
-        avg_older = sum(older_10) / len(older_10) if older_10 else 1
+        avg_recent = sum(recent) / len(recent) if recent else 1
+        avg_older = sum(older) / len(older) if older else 1
 
         ratio = avg_recent / avg_older if avg_older > 0 else 1.0
         last_vol = volumes[-1] if volumes else 0
@@ -306,34 +370,77 @@ class Indicators:
 
     @staticmethod
     def compute_all(close_prices: List[float], ohlc: List[Dict],
-                    current_price: float) -> Dict:
-        """Compute all indicators at once and return a flat dict."""
+                    current_price: float,
+                    profile: Optional[Dict] = None) -> Dict:
+        """Compute all indicators at once and return a flat dict.
+
+        If *profile* is given (e.g. from SCALP_PROFILES), its values
+        override the default indicator periods.  Backward-compatible:
+        when called without a profile, behaviour is identical to before.
+        """
+        p = profile or {}
         result: Dict = {"current_price": current_price}
 
-        result["rsi"] = Indicators.rsi(close_prices)
-        result["macd"] = Indicators.macd(close_prices)
-        result["bb"] = Indicators.bollinger_bands(close_prices)
-        result["atr"] = Indicators.atr(ohlc)
-        result["atr_pct"] = Indicators.atr_pct(ohlc)
-        result["adx"] = Indicators.adx(ohlc)
-        result["stoch_rsi"] = Indicators.stochastic_rsi(close_prices)
-        result["volume"] = Indicators.volume_analysis(ohlc)
+        # ── Core oscillators ────────────────────────
+        rsi_period = p.get("rsi_period", 14)
+        result["rsi"] = Indicators.rsi(close_prices, rsi_period)
 
-        result["ema_9"] = Indicators.ema(close_prices, 9)
-        result["ema_21"] = Indicators.ema(close_prices, 21)
-        result["ema_55"] = Indicators.ema(close_prices, 55)
+        result["macd"] = Indicators.macd(
+            close_prices,
+            p.get("macd_fast", 12),
+            p.get("macd_slow", 26),
+            p.get("macd_signal", 9),
+        )
 
-        result["sma_7"] = Indicators.sma(close_prices, 7)
-        result["sma_21"] = Indicators.sma(close_prices, 21)
-        result["sma_50"] = Indicators.sma(close_prices, 50)
+        result["bb"] = Indicators.bollinger_bands(
+            close_prices,
+            p.get("bb_period", 20),
+            p.get("bb_std", 2.0),
+        )
+
+        atr_period = p.get("atr_period", 14)
+        result["atr"] = Indicators.atr(ohlc, atr_period)
+        result["atr_pct"] = Indicators.atr_pct(ohlc, atr_period)
+
+        adx_period = p.get("adx_period", 14)
+        result["adx"] = Indicators.adx(ohlc, adx_period)
+
+        stoch_period = p.get("stoch_rsi_period", 14)
+        stoch_k = p.get("stoch_k_smooth", 3)
+        result["stoch_rsi"] = Indicators.stochastic_rsi(
+            close_prices, stoch_period, stoch_period, stoch_k,
+        )
+
+        result["volume"] = Indicators.volume_analysis(
+            ohlc,
+            p.get("vol_recent", 5),
+            p.get("vol_older", 10),
+        )
+
+        # ── Moving averages ─────────────────────────
+        ema_short = p.get("ema_short", 9)
+        ema_mid = p.get("ema_mid", 21)
+        ema_long = p.get("ema_long", 55)
+
+        result["ema_9"] = Indicators.ema(close_prices, ema_short)
+        result["ema_21"] = Indicators.ema(close_prices, ema_mid)
+        result["ema_55"] = Indicators.ema(close_prices, ema_long)
+
+        sma_fast = p.get("sma_fast", 7)
+        sma_mid_p = p.get("sma_mid", 21)
+        sma_slow = p.get("sma_slow", 50)
+
+        result["sma_7"] = Indicators.sma(close_prices, sma_fast)
+        result["sma_21"] = Indicators.sma(close_prices, sma_mid_p)
+        result["sma_50"] = Indicators.sma(close_prices, sma_slow)
 
         # EMA slopes (trend velocity)
-        result["ema21_slope"] = Indicators.ema_slope(close_prices, 21, 5)
-        result["ema55_slope"] = Indicators.ema_slope(close_prices, 55, 5)
+        result["ema21_slope"] = Indicators.ema_slope(close_prices, ema_mid, 5)
+        result["ema55_slope"] = Indicators.ema_slope(close_prices, ema_long, 5)
 
-        avg_7 = result["sma_7"]
-        if avg_7 and avg_7 > 0:
-            result["momentum"] = (current_price - avg_7) / avg_7 * 100
+        avg_fast = result["sma_7"]
+        if avg_fast and avg_fast > 0:
+            result["momentum"] = (current_price - avg_fast) / avg_fast * 100
         else:
             result["momentum"] = 0.0
 

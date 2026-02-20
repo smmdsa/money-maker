@@ -19,6 +19,7 @@ from backend.services.strategies import (
     StrategyEngine, Indicators, STRATEGIES,
     calculate_position_size, calculate_liquidation_price, Signal,
 )
+from backend.services.strategies.indicators import SCALP_PROFILES
 
 logger = logging.getLogger(__name__)
 
@@ -341,7 +342,8 @@ class Backtester:
 
             # --- Compute indicators ---
             try:
-                indicators = Indicators.compute_all(close_prices, ohlc_slice, close)
+                profile = SCALP_PROFILES.get(strategy_key)
+                indicators = Indicators.compute_all(close_prices, ohlc_slice, close, profile=profile)
             except Exception:
                 continue
 
@@ -598,7 +600,13 @@ class Backtester:
             liquidation=liq,
             initial_sl=sl,
             best_price=price,
-            trail_pct=(signal.trail_pct or signal.stop_loss_pct) if trailing_enabled else 0,
+            # trail_pct < 0 means strategy explicitly disabled trailing
+            trail_pct=(
+                0 if (not trailing_enabled
+                      or (signal.trail_pct is not None and signal.trail_pct < 0))
+                else (signal.trail_pct if signal.trail_pct and signal.trail_pct > 0
+                      else signal.stop_loss_pct)
+            ),
             opened_at=ts,
         )
         return pos, open_fee

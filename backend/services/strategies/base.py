@@ -112,12 +112,35 @@ class BaseStrategy:
         entry_price: float,
         current_price: float,
         trail_pct: float = 0.0,
+        min_score_override: int = 0,
+        confidence_divisor: float = 0.0,
+        min_score_margin: int = 0,
     ) -> Signal:
-        """Convert raw scores into a Signal object."""
+        """Convert raw scores into a Signal object.
+
+        Optional overrides (used by per-timeframe scalpers):
+          min_score_override — custom minimum score (0 = use default logic)
+          confidence_divisor — custom divisor for confidence calc (0 = default)
+          min_score_margin   — minimum gap between long/short scores (0 = just >)
+        """
         max_score = max(long_score, short_score)
-        # Scalping uses lower threshold for more frequent trades
-        min_score_to_act = 2 if cfg.style == "scalping" else 3
-        confidence = min(max_score / 8.0 if cfg.style == "scalping" else max_score / 10.0, 0.95)
+
+        # Determine min score threshold
+        if min_score_override > 0:
+            min_score_to_act = min_score_override
+        elif cfg.style == "scalping":
+            min_score_to_act = 2
+        else:
+            min_score_to_act = 3
+
+        # Determine confidence
+        if confidence_divisor > 0:
+            confidence = min(max_score / confidence_divisor, 0.95)
+        elif cfg.style == "scalping":
+            confidence = min(max_score / 8.0, 0.95)
+        else:
+            confidence = min(max_score / 10.0, 0.95)
+
         reasoning_str = "; ".join(reasons) if reasons else "No clear signals"
 
         # Scale leverage with confidence
@@ -141,7 +164,12 @@ class BaseStrategy:
             return Signal(direction, conf, lev, stop_loss_pct, take_profit_pct,
                           reason, scores, trail_pct=trail_pct)
 
-        if long_score >= min_score_to_act and long_score > short_score and not has_long:
+        # Score margin check: require long/short gap for entry quality
+        effective_margin = max(min_score_margin, 1)
+
+        if (long_score >= min_score_to_act
+                and (long_score - short_score) >= effective_margin
+                and not has_long):
             if confidence >= cfg.min_confidence:
                 return _sig(
                     "long", confidence, leverage,
@@ -149,7 +177,9 @@ class BaseStrategy:
                     {"long": long_score, "short": short_score}
                 )
 
-        if short_score >= min_score_to_act and short_score > long_score and not has_short:
+        if (short_score >= min_score_to_act
+                and (short_score - long_score) >= effective_margin
+                and not has_short):
             if confidence >= cfg.min_confidence:
                 return _sig(
                     "short", confidence, leverage,

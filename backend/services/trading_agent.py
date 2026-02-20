@@ -19,6 +19,7 @@ from backend.services.strategies import (
     StrategyEngine, Indicators, STRATEGIES,
     calculate_position_size, calculate_liquidation_price, Signal
 )
+from backend.services.strategies.indicators import SCALP_PROFILES
 
 logger = logging.getLogger(__name__)
 
@@ -371,8 +372,9 @@ class TradingAgentService:
         if len(close_prices) < 15:
             return None
 
-        # Compute all indicators
-        indicators = Indicators.compute_all(close_prices, ohlc or [], current_price)
+        # Compute all indicators (with timeframe-specific profile for scalpers)
+        profile = SCALP_PROFILES.get(strategy_key)
+        indicators = Indicators.compute_all(close_prices, ohlc or [], current_price, profile=profile)
 
         # Add market context
         indicators["price_change_24h"] = market_data.get("price_change_24h", 0) or 0

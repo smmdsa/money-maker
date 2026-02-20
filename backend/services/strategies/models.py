@@ -83,30 +83,31 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     "scalper": StrategyConfig(
         key="scalper",
         name="Scalper Pro",
-        description="Trend-following pullback scalping (1h candles). Enters pullbacks within "
-                    "short-term trends using EMA alignment + RSI + BB confluence. "
-                    "ATR-adaptive stops. Profits in any market.",
+        description="Trend-following pullback scalping (1h candles). EMA 3-line alignment "
+                    "with RSI/BB/MACD/StochRSI/ADX confluence + counter-trend penalty. "
+                    "ATR-adaptive stops with 2.5:1 R:R. Reduced leverage for fee control.",
         style="scalping",
-        default_leverage=5,
-        max_leverage=10,
-        max_positions=5,
-        risk_per_trade_pct=4.0,
+        default_leverage=3,
+        max_leverage=5,
+        max_positions=3,
+        risk_per_trade_pct=3.0,
         min_confidence=0.30,
-        trail_atr_mult=2.5,
+        trail_atr_mult=3.5,
         kline_interval="1h",
         scan_limit=15,
     ),
     "scalper_1m": StrategyConfig(
         key="scalper_1m",
         name="Scalper Pro 1m",
-        description="Ultra-fast 1-minute scalper. Same 6-layer trend-pullback logic "
-                    "on 1m candles. Extremely tight ATR stops. Best for high-frequency.",
+        description="Ultra-fast 1m scalper with RSI(7), MACD(5,13,4), BB(10). "
+                    "Requires ≥5 score layers. No trailing (pure SL/TP). "
+                    "Volume required. Strong counter-trend penalty.",
         style="scalping",
-        default_leverage=10,
-        max_leverage=20,
-        max_positions=5,
-        risk_per_trade_pct=2.0,
-        min_confidence=0.25,
+        default_leverage=3,
+        max_leverage=5,
+        max_positions=3,
+        risk_per_trade_pct=1.5,
+        min_confidence=0.35,
         trail_atr_mult=1.5,
         kline_interval="1m",
         scan_limit=15,
@@ -114,14 +115,15 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     "scalper_3m": StrategyConfig(
         key="scalper_3m",
         name="Scalper Pro 3m",
-        description="Fast 3-minute scalper. 6-layer trend-pullback logic on 3m candles. "
-                    "Good balance between speed and signal quality.",
+        description="Fast 3m scalper with RSI(9), MACD(8,17,6), BB(14). "
+                    "Requires ≥5 score layers. No trailing (pure SL/TP). "
+                    "Volume required. Strong counter-trend penalty.",
         style="scalping",
-        default_leverage=8,
-        max_leverage=15,
-        max_positions=5,
-        risk_per_trade_pct=2.5,
-        min_confidence=0.25,
+        default_leverage=3,
+        max_leverage=5,
+        max_positions=3,
+        risk_per_trade_pct=2.0,
+        min_confidence=0.35,
         trail_atr_mult=1.8,
         kline_interval="3m",
         scan_limit=15,
@@ -129,30 +131,32 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     "scalper_5m": StrategyConfig(
         key="scalper_5m",
         name="Scalper Pro 5m",
-        description="Classic 5-minute scalper. 6-layer trend-pullback logic on 5m candles. "
-                    "Standard daytrading timeframe with solid signal quality.",
+        description="Classic 5m scalper with RSI(10), MACD(8,21,7), BB(16). "
+                    "Requires ≥4 score layers. Trail 3× ATR. "
+                    "ADX filter + counter-trend penalty.",
         style="scalping",
-        default_leverage=7,
-        max_leverage=12,
-        max_positions=5,
-        risk_per_trade_pct=3.0,
-        min_confidence=0.25,
-        trail_atr_mult=2.0,
+        default_leverage=3,
+        max_leverage=7,
+        max_positions=3,
+        risk_per_trade_pct=2.5,
+        min_confidence=0.30,
+        trail_atr_mult=3.0,
         kline_interval="5m",
         scan_limit=15,
     ),
     "scalper_15m": StrategyConfig(
         key="scalper_15m",
         name="Scalper Pro 15m",
-        description="Swing scalper on 15-minute candles. Same 6-layer logic with wider ATR stops. "
-                    "Fewer trades, higher quality entries.",
+        description="Swing scalper on 15m candles with RSI(12), MACD(10,22,8), BB(18). "
+                    "Requires ≥4 score layers. Trail 3× ATR. "
+                    "ADX filter + counter-trend penalty. 2.5:1 R:R.",
         style="scalping",
-        default_leverage=6,
-        max_leverage=10,
-        max_positions=5,
-        risk_per_trade_pct=3.5,
+        default_leverage=3,
+        max_leverage=5,
+        max_positions=3,
+        risk_per_trade_pct=2.5,
         min_confidence=0.30,
-        trail_atr_mult=2.2,
+        trail_atr_mult=3.0,
         kline_interval="15m",
         scan_limit=15,
     ),

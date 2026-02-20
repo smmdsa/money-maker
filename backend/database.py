@@ -19,6 +19,18 @@ engine = create_engine(
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 )
 
+# Enable WAL mode for SQLite — allows concurrent reads while writing
+# and prevents "database is locked" errors under multi-thread access.
+if "sqlite" in DATABASE_URL:
+    from sqlalchemy import event as sa_event
+
+    @sa_event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
