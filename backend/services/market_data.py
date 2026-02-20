@@ -497,6 +497,15 @@ class MarketDataService:
         # Primary provider
         self._binance = BinanceProvider()
 
+        # WebSocket manager (set externally via set_ws_manager)
+        self._ws_manager = None
+
+    def set_ws_manager(self, ws_manager):
+        """Connect the Binance WebSocket manager for real-time price data.
+        When connected, WS prices are used as L0 cache (before REST/cache)."""
+        self._ws_manager = ws_manager
+        logger.info("MarketDataService: WebSocket manager connected")
+
     # ── Cache helpers ─────────────────────────────────────────────────────
 
     def _get_cache(self, key: str):
@@ -578,11 +587,25 @@ class MarketDataService:
 
     def get_current_prices(self) -> Dict[str, float]:
         """Get current USD prices for all supported coins."""
+        # Level 0: WebSocket (always fresh, ~1s latency)
+        if self._ws_manager and self._ws_manager.prices_available:
+            all_ws = self._ws_manager.get_all_mark_prices()
+            prices = {}
+            for coin in self.supported_coins:
+                sym = BinanceProvider.SYMBOL_MAP.get(coin)
+                if sym and sym in all_ws:
+                    prices[coin] = all_ws[sym]
+                    self._last_known_prices[coin] = all_ws[sym]
+            if len(prices) >= len(self.supported_coins) * 0.5:
+                self._current_provider = "Binance WebSocket"
+                return prices
+
+        # Level 1: Cache
         cached = self._get_cache("prices")
         if cached:
             return cached
 
-        # Primary: Binance Futures
+        # Level 2: Binance Futures REST
         prices = self._binance.get_prices(self.supported_coins)
         if prices:
             self._current_provider = "Binance Futures"
@@ -618,19 +641,58 @@ class MarketDataService:
         return {}
 
     def get_coin_price(self, coin: str) -> Optional[float]:
-        """Get current price for a specific coin"""
+        """Get current price for a specific coin."""
+        # Fast path: single-symbol WS lookup (no need to fetch all prices)
+        if self._ws_manager and self._ws_manager.prices_available:
+            sym = BinanceProvider.SYMBOL_MAP.get(coin)
+            if sym:
+                price = self._ws_manager.get_mark_price(sym)
+                if price:
+                    self._last_known_prices[coin] = price
+                    return price
+
         prices = self.get_current_prices()
         return prices.get(coin)
 
     def get_fresh_prices(self, coins: List[str]) -> Dict[str, float]:
         """Get prices bypassing cache — used by the risk monitor for real-time
-        SL/TP/liquidation checks on open positions."""
+        SL/TP/liquidation checks on open positions.
+
+        Priority: WebSocket (instant) → REST → last known cache.
+        """
+        # Level 0: WebSocket (instant, no REST call needed)
+        if self._ws_manager and self._ws_manager.prices_available:
+            prices = {}
+            missing = []
+            for coin in coins:
+                sym = BinanceProvider.SYMBOL_MAP.get(coin)
+                if sym:
+                    price = self._ws_manager.get_mark_price(sym)
+                    if price:
+                        prices[coin] = price
+                        self._last_known_prices[coin] = price
+                    else:
+                        missing.append(coin)
+                else:
+                    missing.append(coin)
+
+            if not missing:
+                return prices
+
+            # Supplement missing coins with REST
+            rest_prices = self._binance.get_prices(missing)
+            for c, p in rest_prices.items():
+                prices[c] = p
+                self._last_known_prices[c] = p
+            return prices
+
+        # Fallback: REST
         prices = self._binance.get_prices(coins)
         if prices:
             for coin, price in prices.items():
                 self._last_known_prices[coin] = price
             return prices
-        # Fallback to cached prices if Binance fails
+        # Last resort: cached prices
         return {c: self._last_known_prices[c] for c in coins
                 if c in self._last_known_prices}
 
@@ -848,6 +910,42 @@ class MarketDataService:
         if ohlc:
             ttl = self._INTERVAL_CACHE_TTL.get(interval, 300)
             self._set_cache(cache_key, ohlc, ttl)
+
+        # Enrich latest candle with real-time WebSocket kline data
+        if ohlc and self._ws_manager and self._ws_manager.is_connected:
+            sym = BinanceProvider.SYMBOL_MAP.get(coin)
+            if sym:
+                ws_kline = self._ws_manager.get_latest_kline(sym, interval)
+                if ws_kline and ws_kline.get("timestamp"):
+                    ohlc = list(ohlc)  # Shallow copy — don't mutate cache
+                    last_ts = ohlc[-1].get("timestamp")
+                    ws_ts = ws_kline["timestamp"]
+                    if last_ts and ws_ts:
+                        last_s = int(last_ts.timestamp())
+                        ws_s = int(ws_ts.timestamp())
+                        if ws_s == last_s:
+                            # Same candle — update with freshest data
+                            ohlc[-1] = {
+                                "timestamp": ws_ts,
+                                "open": ws_kline["open"],
+                                "high": ws_kline["high"],
+                                "low": ws_kline["low"],
+                                "close": ws_kline["close"],
+                                "volume": ws_kline["volume"],
+                            }
+                        elif ws_s > last_s and ws_kline.get("closed"):
+                            # New closed candle — append
+                            ohlc.append({
+                                "timestamp": ws_ts,
+                                "open": ws_kline["open"],
+                                "high": ws_kline["high"],
+                                "low": ws_kline["low"],
+                                "close": ws_kline["close"],
+                                "volume": ws_kline["volume"],
+                            })
+                            if len(ohlc) > limit:
+                                ohlc = ohlc[-limit:]
+
         return ohlc
 
     # ── Trending ──────────────────────────────────────────────────────────
@@ -894,9 +992,12 @@ class MarketDataService:
         else:
             cg_ok = False
 
+        ws_ok = self._ws_manager.is_connected if self._ws_manager else False
+
         return {
-            "status": "ok" if binance_ok or cg_ok or self._last_known_prices else "degraded",
+            "status": "ok" if binance_ok or cg_ok or ws_ok or self._last_known_prices else "degraded",
             "binance_futures": "ok" if binance_ok else "down",
+            "binance_websocket": "connected" if ws_ok else "disconnected",
             "coingecko": "ok" if cg_ok else ("blocked" if cg_blocked else "down"),
             "consecutive_failures": self._consecutive_failures,
             "cache_entries": len(self._cache),

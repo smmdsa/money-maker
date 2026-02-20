@@ -1273,6 +1273,7 @@
                     <h2>Market Prices</h2>
                     <div style="display:flex;align-items:center;gap:10px;">
                         <span id="dataSourceBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:#e3f2fd;color:#1565c0;font-weight:600;white-space:nowrap;"></span>
+                        <span id="wsBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:#333;color:#888;font-weight:600;white-space:nowrap;">WS ⏳</span>
                         <div class="countdown" id="priceCountdown">
                             <span id="priceCountdownText">15s</span>
                             <div class="countdown-bar">
@@ -1685,10 +1686,34 @@
                         loadTrades(selectedAgentId);
                         loadDecisions(selectedAgentId);
                     }
+                } else if (data.type === 'price_update') {
+                    // Real-time price updates from Binance WebSocket (every 3s)
+                    updatePricesFromWS(data.prices, data.funding_rates || {});
+                    // Update WS badge
+                    const wsBadge = document.getElementById('wsBadge');
+                    if (wsBadge) {
+                        wsBadge.textContent = 'WS ✓';
+                        wsBadge.style.background = '#1b5e20';
+                        wsBadge.style.color = '#a5d6a7';
+                    }
+                    // Update chart candle
+                    if (typeof Charts !== 'undefined') {
+                        try {
+                            const coin = Charts.getCurrentCoin();
+                            if (data.prices[coin]) Charts.updateLastPrice(coin, data.prices[coin]);
+                        } catch (e) { /* silent */ }
+                    }
                 }
             };
             
             ws.onclose = function() {
+                // Update WS badge on disconnect
+                const wsBadge = document.getElementById('wsBadge');
+                if (wsBadge) {
+                    wsBadge.textContent = 'WS ✗';
+                    wsBadge.style.background = '#4a1414';
+                    wsBadge.style.color = '#ef9a9a';
+                }
                 // Reconnect after 5 seconds
                 setTimeout(initWebSocket, 5000);
             };
@@ -2072,8 +2097,9 @@
                 if (badge) {
                     badge.textContent = `via ${provider}`;
                     const isBinance = provider.includes('Binance');
-                    badge.style.background = isBinance ? '#fff3e0' : '#e3f2fd';
-                    badge.style.color = isBinance ? '#e65100' : '#1565c0';
+                    const isWS = provider.includes('WebSocket');
+                    badge.style.background = isWS ? '#e8f5e9' : isBinance ? '#fff3e0' : '#e3f2fd';
+                    badge.style.color = isWS ? '#2e7d32' : isBinance ? '#e65100' : '#1565c0';
                 }
                 
                 const marketPrices = document.getElementById('marketPrices');
@@ -2102,6 +2128,59 @@
                 console.error('Error loading market prices:', error);
             }
         }
+
+        // Update price cards in-place from WebSocket data (no DOM rebuild)
+        function updatePricesFromWS(prices, fundingRates) {
+            const cards = document.querySelectorAll('#marketPrices .price-card');
+            cards.forEach(card => {
+                const nameEl = card.querySelector('.coin-name');
+                if (!nameEl) return;
+                const symbol = nameEl.textContent.trim();
+                // Find matching coin by symbol
+                for (const [coinId, price] of Object.entries(prices)) {
+                    const sym = coinId.replace(/-\d+$/, '').replace(/-/g, '').slice(0, 5).toUpperCase();
+                    // Match by Binance symbol map
+                    const coinSymbol = _wsSymbolMap[coinId];
+                    if (coinSymbol === symbol || sym === symbol) {
+                        const priceEl = card.querySelector('.coin-price');
+                        if (priceEl) {
+                            const newText = '$' + fmtPrice(price);
+                            if (priceEl.textContent !== newText) {
+                                priceEl.textContent = newText;
+                                // Flash animation
+                                priceEl.style.transition = 'color 0.3s';
+                                priceEl.style.color = '#00e5ff';
+                                setTimeout(() => { priceEl.style.color = ''; }, 600);
+                            }
+                        }
+                        // Update funding rate if available
+                        const fr = fundingRates[coinId];
+                        if (fr != null) {
+                            const frEl = card.querySelector('.fr-value');
+                            if (frEl) {
+                                const frPct = fr * 100;
+                                frEl.textContent = `${frPct >= 0 ? '+' : ''}${frPct.toFixed(4)}%`;
+                                frEl.className = `fr-value ${frPct > 0 ? 'fr-positive' : frPct < 0 ? 'fr-negative' : ''}`;
+                            }
+                        }
+                        break;
+                    }
+                }
+            });
+        }
+
+        // CoinGecko ID → display symbol mapping (for WS price matching)
+        const _wsSymbolMap = {
+            'bitcoin': 'BTC', 'ethereum': 'ETH', 'binancecoin': 'BNB',
+            'cardano': 'ADA', 'solana': 'SOL', 'ripple': 'XRP',
+            'polkadot': 'DOT', 'dogecoin': 'DOGE', 'avalanche-2': 'AVAX',
+            'chainlink': 'LINK', 'near': 'NEAR', 'sui': 'SUI',
+            'pepe': '1000PEPE', 'aptos': 'APT', 'arbitrum': 'ARB',
+            'filecoin': 'FIL', 'render-token': 'RENDER',
+            'injective-protocol': 'INJ', 'fetch-ai': 'FET',
+            'bonk': '1000BONK', 'floki': '1000FLOKI',
+            'sei-network': 'SEI', 'wif': 'WIF',
+        };
         
         // Load news
         async function loadNews() {

@@ -1,6 +1,6 @@
 # Money Maker — Feature Backlog
 
-> Última actualización: 2026-02-19 (sesión 6)
+> Última actualización: 2026-02-20 (sesión 7)
 
 ---
 
@@ -586,31 +586,103 @@ Loop ligero que cada 5 segundos:
 | `backend/services/trading_agent.py` | `check_risk()` — método ligero de verificación SL/TP/liquidación |
 | `main.py` | Segundo job APScheduler cada 5s, `_sync_risk_check()` |
 
-#### Fase 2: Binance WebSocket Streams (futura)
+#### Fase 2: Binance WebSocket Streams — COMPLETADO
 
-**Estado**: 📋 Planificado  
-**Impacto**: Latencia de monitoreo de ~5s → ~100ms
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-20  
+**Impacto**: Latencia de monitoreo de ~5s → ~1s (mark price stream cada 1s)
 
-Reemplazar el polling de Fase 1 por WebSocket push de Binance Futures:
+Reemplaza el polling REST por WebSocket push de Binance Futures para datos de mercado en tiempo real.
+
+**Stream principal:**
+```
+wss://fstream.binance.com/stream?streams=!markPrice@arr@1s
+```
+
+**Datos recibidos en tiempo real (cada 1 segundo):**
+- **Mark Price** para ~687 símbolos de futuros (todos los pares USDT-M)
+- **Funding Rate** actualizado en cada mensaje
+- **Index Price** (precio promedio de múltiples exchanges)
+- **Kline updates** (suscripción dinámica por posición abierta)
+
+**Ventajas vs polling REST:**
+
+| Aspecto | Antes (REST) | Después (WebSocket) |
+|---------|:------------:|:-------------------:|
+| Latencia de precio | ~5s (polling interval) | **~1s** (push stream) |
+| Requests API para precios | ~12/min por posición | **0** (single WS connection) |
+| Cobertura de símbolos | 23 (configurados) | **687** (todos los futuros) |
+| Datos de funding rate | REST cada 15s (cached) | **1s** (real-time push) |
+| Kline updates | REST cached 30-300s | **Real-time** (cada trade) |
+| Reconexión | N/A (stateless) | **Auto-reconnect** (1-60s backoff) |
+
+**Arquitectura implementada:**
 
 ```
-wss://fstream.binance.com/ws/btcusdt@ticker
+BinanceWSManager (async, event loop)
+├── _connection_loop()        # Auto-reconnect con exponential backoff
+├── _connect_and_listen()     # Conexión WS + procesamiento de mensajes
+├── _on_mark_price_batch()    # Procesa !markPrice@arr@1s
+├── _on_kline()               # Procesa kline updates dinámicos
+├── get_mark_price(sym)       # Lectura thread-safe (Lock)
+├── get_all_mark_prices()     # Todos los precios, una sola lectura
+├── get_funding_rate(sym)     # Funding rate en tiempo real
+├── subscribe_klines(sym, i)  # Suscripción dinámica a klines
+├── unsubscribe_klines()      # Desuscripción
+├── sync_kline_subscriptions()# Sync con posiciones abiertas
+└── health_check()            # Estado de conexión + stats
 ```
 
-**Ventajas vs polling:**
-- **Zero polling**: Binance envía el precio cuando cambia, no necesitamos preguntar
-- **Latencia ~100ms**: Detección casi instantánea de SL/TP/liquidación
-- **Menos requests**: No consume el rate limit de REST API
-- **Multi-stream**: Un solo WebSocket puede suscribirse a múltiples símbolos
+**Integración con MarketDataService (4 niveles de prioridad):**
 
-**Implementación planificada:**
-- `backend/services/ws_monitor.py` — Manager de WebSocket connections
-- Suscripción dinámica: cuando un agente abre posición en BTCUSDT → subscribe al stream
-- Cuando cierra → unsubscribe
-- Reconnect automático con backoff exponencial
-- Fallback a polling (Fase 1) si WebSocket se desconecta
+| Método | Prioridad | Detalle |
+|--------|:---------:|--------|
+| `get_coin_price()` | WS → REST → Cache | Lectura directa de WS para precio individual |
+| `get_current_prices()` | WS → Cache → REST → CoinGecko → Last Known | Si WS cubre ≥50% de coins, retorna inmediatamente |
+| `get_fresh_prices()` | WS → REST → Last Known | Risk monitor usa WS sin REST si disponible |
+| `get_ohlc_interval()` | Cache/REST + WS kline enrichment | Última vela actualizada con datos WS en tiempo real |
 
-**Complejidad**: Media-Alta (gestión de conexiones async, reconexión, estado compartido)
+**Jobs de background añadidos:**
+
+| Job | Frecuencia | Responsabilidad |
+|-----|:----------:|----------------|
+| `broadcast_ws_prices` | 3s | Push precios + funding rates al frontend vía WebSocket |
+| `sync_kline_subscriptions` | 60s | Suscribe klines para símbolos con posiciones abiertas |
+
+**Frontend (real-time price updates):**
+- Handler `price_update` en WebSocket: actualiza precios en price cards sin reload
+- Flash animation (cyan) cuando un precio cambia
+- Badge `WS ✓` (verde) / `WS ✗` (rojo) junto al data source badge
+- Funding rates actualizados en real-time
+- Chart candle actualizado cada 3s vía WS
+
+**Endpoints nuevos:**
+- `GET /api/ws/status` — Estado de conexión WebSocket + estadísticas
+
+**Health check actualizado:**
+```json
+{
+  "websocket": {
+    "status": "connected",
+    "messages_received": 245,
+    "price_symbols_tracked": 687,
+    "kline_streams_active": 0,
+    "last_message_age_s": 0.2,
+    "prices_fresh": true
+  }
+}
+```
+
+**Archivos creados / modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/ws_monitor.py` | **NUEVO** (~300 líneas) — BinanceWSManager completo |
+| `backend/services/market_data.py` | WS como L0 cache en get_coin_price/get_current_prices/get_fresh_prices, kline enrichment en get_ohlc_interval, WS en health_check |
+| `main.py` | Import + init WS manager, broadcast_ws_prices (3s), sync_kline_subscriptions (60s), /api/ws/status, startup/shutdown WS lifecycle |
+| `static/index.html` | Handler price_update, WS badge, flash animation, funding rate real-time |
+
+**Complejidad**: Media-Alta (gestión de conexiones async, thread-safety, reconexión)
 
 ---
 
@@ -989,6 +1061,7 @@ Bot de Telegram y/o email para notificar:
 5d. Account Profiles (Micro/Small/Std/Large) ──→ ✅ COMPLETADO (2026-02-19)
 7.  Market Clocks (World Markets) ──→ ✅ COMPLETADO (2026-02-19)
 8.  Scalper Strategy Overhaul ──→ ✅ COMPLETADO (2026-02-19)
+5e. Binance WebSocket Streams ──→ ✅ COMPLETADO (2026-02-20)
 ─── Próximo ciclo (Top 5) ───────────────────────────────
 9.  Trailing SL + Trailing TP (B5+B6) ──→ 🔜 next
 10. Fear & Greed Index (A1) ──→ 🔜 next
@@ -996,7 +1069,7 @@ Bot de Telegram y/o email para notificar:
 12. Export CSV de Trades (C4) ──→ 🔜 next
 13. On-chain / Whale Alerts (A2) ──→ 🔜 next
 ─── Futuro ──────────────────────────────────────────────
-5e. Risk Monitor (WebSocket) ──→ planificado (Fase 2)
+5f. Event-driven Risk Monitor ──→ planificado (reaccionar a cada WS tick)
 ```
 
 ---
@@ -1007,7 +1080,8 @@ Bot de Telegram y/o email para notificar:
 |------------|-----------|---------|
 | Backend | FastAPI + uvicorn | Puerto 8001, 21+ endpoints + WebSocket |
 | Base de datos | SQLite + SQLAlchemy | 6 modelos (TradingAgent, Portfolio, Trade, Decision, PortfolioSnapshot, NewsEvent) |
-| Market Data (primary) | **Binance API** | 1200 req/min, sin API key, precios + OHLC + históricos + volumen + kline intervals (1m-1h) |
+| Market Data (primary) | **Binance API** | REST + **WebSocket** (real-time mark prices, funding rates, klines) |
+| Market Data (WS) | **Binance Futures WebSocket** | `!markPrice@arr@1s` — 687 símbolos, ~1s latencia, auto-reconnect |
 | Market Data (fallback) | CoinGecko API | 10 req/min free tier, RateLimiter con 5s max wait |
 | Noticias | RSS feeds | CoinDesk, CoinTelegraph, Bitcoin Magazine + CryptoPanic (opcional) |
 | Charts | TradingView Lightweight Charts v4 | CDN, open source, candlestick + indicadores + price sync |
@@ -1019,22 +1093,23 @@ Bot de Telegram y/o email para notificar:
 | Futuros | LONG/SHORT, leverage 1-125x, liquidation, SL/TP | Position sizing profesional |
 | Market Clocks | 8 mercados mundiales | Hora real, alertas open/close, integración con agent decisions |
 | Account Profiles | 4 presets (Micro/Small/Standard/Large) | Auto-suggest por balance, leverage/risk ranges |
-| Scheduler | APScheduler | Ciclo de trading 60s + Risk monitor 5s |
-| Async | asyncio.to_thread() | Trading cycle nunca bloquea el event loop |
+| Scheduler | APScheduler | Trading 60s + Risk 5s + WS broadcast 3s + Kline sync 60s |
+| Async | asyncio.to_thread() + WebSocket | Trading cycle en thread, WS en event loop |
 
 ### Estructura de archivos (~11,000+ líneas)
 
 | Archivo | Líneas | Responsabilidad |
 |---------|--------|----------------|
-| `main.py` | 735+ | Endpoints, scheduler, WebSocket, backtest API, market hours |
+| `main.py` | 800+ | Endpoints, scheduler, WebSocket, backtest API, market hours, WS broadcast |
 | `backend/services/strategies.py` | 1410+ | Indicadores técnicos, 10 estrategias, position sizing con risk overrides |
 | `backend/services/backtester.py` | 700+ | Motor de backtesting, commission model, sliding window |
-| `backend/services/market_data.py` | 905+ | RateLimiter, BinanceProvider (Futures+Spot), MarketDataService, get_fresh_prices, get_ohlc_interval, 23 tokens |
+| `backend/services/market_data.py` | 960+ | RateLimiter, BinanceProvider, MarketDataService, WS integration, 23 tokens |
 | `backend/services/trading_agent.py` | 770+ | Futures lifecycle, strategy engine, LLM integration, risk monitor, market hours context |
+| `backend/services/ws_monitor.py` | 300+ | BinanceWSManager, real-time mark prices/funding/klines, auto-reconnect |
 | `backend/services/llm_service.py` | 270 | Gemini 2.0 Flash, LLMAnalysis, rate limiting |
 | `backend/services/news_service.py` | 313 | RSS feeds, sentimiento por keywords |
 | `backend/models/database.py` | 130+ | 6 modelos SQLAlchemy (con campos futures + LLM + decision_id + account profiles) |
-| `static/index.html` | 2600+ | Dashboard + Backtesting SPA, strategy picker, futures UI, LLM blocks, market clocks, account profiles, position cards |
+| `static/index.html` | 2700+ | Dashboard + Backtesting SPA, strategy picker, futures UI, LLM blocks, market clocks, account profiles, position cards, WS price updates |
 | `static/charts.js` | 390+ | Módulo de charts TradingView con price sync |
 | `backtest_cli.py` | 320+ | CLI de backtesting, comparativas, colores |
 

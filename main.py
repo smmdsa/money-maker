@@ -26,6 +26,8 @@ from backend.services.news_service import NewsService
 from backend.services.llm_service import LLMService
 from backend.services.strategies import STRATEGIES
 from backend.services.backtester import Backtester
+from backend.services.ws_monitor import BinanceWSManager
+from backend.services.market_data import BinanceProvider
 from pydantic import BaseModel
 
 # Configure logging
@@ -41,6 +43,8 @@ llm_service = LLMService()
 trading_service = TradingAgentService(market_service, llm_service)
 news_service = NewsService()
 backtester = Backtester()
+ws_manager = BinanceWSManager()
+market_service.set_ws_manager(ws_manager)
 
 # Scheduler for background tasks
 scheduler = AsyncIOScheduler()
@@ -501,6 +505,12 @@ def get_strategies():
     }
 
 
+@app.get("/api/ws/status")
+def ws_status():
+    """Binance WebSocket connection status and statistics"""
+    return ws_manager.health_check()
+
+
 @app.get("/api/market/hours")
 def market_hours():
     """Get current status of major world stock markets"""
@@ -585,6 +595,70 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # Background tasks
+
+async def broadcast_ws_prices():
+    """Push real-time prices to frontend via WebSocket every 3 seconds.
+    Only runs when Binance WS is connected AND frontend clients are connected.
+    """
+    if not ws_manager.is_connected or not manager.active_connections:
+        return
+
+    all_prices = ws_manager.get_all_mark_prices()
+    if not all_prices:
+        return
+
+    # Convert Binance symbols → coin IDs for the frontend
+    prices = {}
+    funding = {}
+    for coin in market_service.supported_coins:
+        sym = BinanceProvider.SYMBOL_MAP.get(coin)
+        if sym and sym in all_prices:
+            prices[coin] = all_prices[sym]
+            fr = ws_manager.get_funding_rate(sym)
+            if fr is not None:
+                funding[coin] = fr
+
+    if prices:
+        await manager.broadcast({
+            "type": "price_update",
+            "prices": prices,
+            "funding_rates": funding,
+            "source": "websocket",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+
+async def sync_kline_subscriptions():
+    """Subscribe to kline WebSocket streams for symbols with open positions.
+    Runs every 60s to keep subscriptions aligned with active trading.
+    """
+    if not ws_manager.is_connected:
+        return
+
+    try:
+        db = next(get_db())
+        agents = db.query(TradingAgent).filter(
+            TradingAgent.status == "active"
+        ).all()
+
+        needed = set()
+        for agent in agents:
+            cfg = STRATEGIES.get(agent.strategy)
+            interval = cfg.kline_interval if cfg else ""
+            if not interval:
+                continue
+
+            for pos in agent.portfolio:
+                if pos.amount > 0:
+                    sym = BinanceProvider.SYMBOL_MAP.get(pos.cryptocurrency)
+                    if sym:
+                        needed.add(f"{sym}_{interval}")
+
+        await ws_manager.sync_kline_subscriptions(needed)
+        db.close()
+    except Exception as e:
+        logger.error(f"Kline subscription sync error: {e}")
+
 
 async def run_risk_monitor():
     """Lightweight risk check every 5 seconds.
@@ -694,6 +768,7 @@ def health_check():
         "status": "ok",
         "market_service": market_service.health_check(),
         "llm_service": llm_service.health_check(),
+        "websocket": ws_manager.health_check(),
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -886,19 +961,29 @@ async def startup_event():
 
     # Repair any agent balances corrupted by past race conditions
     _repair_agent_balances()
+
+    # Start Binance WebSocket for real-time market data
+    await ws_manager.start()
     
     # Start background scheduler
     scheduler.add_job(run_trading_cycle, 'interval', seconds=60, id='trading_cycle')
     scheduler.add_job(run_risk_monitor, 'interval', seconds=5, id='risk_monitor')
+    scheduler.add_job(broadcast_ws_prices, 'interval', seconds=3, id='ws_price_broadcast')
+    scheduler.add_job(sync_kline_subscriptions, 'interval', seconds=60, id='kline_sync',
+                      next_run_time=datetime.utcnow() + timedelta(seconds=10))
     scheduler.start()
     
-    logger.info("Application started — Trading cycle: 60s | Risk monitor: 5s")
+    logger.info(
+        "Application started — Trading: 60s | Risk: 5s | "
+        "WS broadcast: 3s | Kline sync: 60s"
+    )
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("Shutting down...")
+    await ws_manager.stop()
     scheduler.shutdown()
 
 
