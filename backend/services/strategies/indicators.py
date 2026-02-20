@@ -366,6 +366,140 @@ class Indicators:
         cur = series[-1]
         return ((cur - old) / old * 100) if old > 0 else 0.0
 
+    # ── Support / Resistance Levels ─────────────────────────────────────
+
+    @staticmethod
+    def support_resistance(ohlc: List[Dict], lookback: int = 20,
+                           tolerance_pct: float = 0.3) -> Optional[Dict]:
+        """Detect key support and resistance levels from swing highs/lows.
+
+        Uses pivot-point method: a swing high (resistance) occurs when
+        the high is higher than the 2 bars on each side. Vice-versa for
+        support.  Clusters within *tolerance_pct* are merged.
+
+        Returns dict with strongest support/resistance relative to last close.
+        """
+        if len(ohlc) < lookback + 4:
+            return None
+
+        recent = ohlc[-lookback:]
+        swing_highs: List[float] = []
+        swing_lows: List[float] = []
+
+        for i in range(2, len(recent) - 2):
+            h = recent[i]["high"]
+            l = recent[i]["low"]
+            if (h > recent[i-1]["high"] and h > recent[i-2]["high"]
+                    and h > recent[i+1]["high"] and h > recent[i+2]["high"]):
+                swing_highs.append(h)
+            if (l < recent[i-1]["low"] and l < recent[i-2]["low"]
+                    and l < recent[i+1]["low"] and l < recent[i+2]["low"]):
+                swing_lows.append(l)
+
+        current = ohlc[-1]["close"]
+
+        # Cluster nearby levels
+        def _cluster(levels: List[float], tol: float) -> List[float]:
+            if not levels:
+                return []
+            levels = sorted(levels)
+            clusters = [[levels[0]]]
+            for lv in levels[1:]:
+                if (lv - clusters[-1][-1]) / clusters[-1][-1] * 100 < tol:
+                    clusters[-1].append(lv)
+                else:
+                    clusters.append([lv])
+            return [sum(c) / len(c) for c in clusters]
+
+        resistances = _cluster(swing_highs, tolerance_pct)
+        supports = _cluster(swing_lows, tolerance_pct)
+
+        # Find nearest support below and resistance above current price
+        nearest_support = max((s for s in supports if s < current), default=None)
+        nearest_resistance = min((r for r in resistances if r > current), default=None)
+
+        support_dist_pct = ((current - nearest_support) / current * 100) if nearest_support else None
+        resist_dist_pct = ((nearest_resistance - current) / current * 100) if nearest_resistance else None
+
+        return {
+            "nearest_support": nearest_support,
+            "nearest_resistance": nearest_resistance,
+            "support_distance_pct": support_dist_pct,
+            "resistance_distance_pct": resist_dist_pct,
+            "support_count": len(supports),
+            "resistance_count": len(resistances),
+        }
+
+    # ── Higher-Timeframe Context (MTF summary) ──────────────────────────
+
+    @staticmethod
+    def compute_htf_context(close_prices: List[float],
+                            ohlc: List[Dict],
+                            current_price: float,
+                            profile: Optional[Dict] = None) -> Dict:
+        """Compute a condensed set of indicators for a higher timeframe.
+
+        Returns trend direction, strength, and S/R levels — designed to
+        be fed into the scalper as *mtf_context*.
+        """
+        p = profile or {}
+        ctx: Dict = {}
+
+        # EMA alignment
+        ema_s = Indicators.ema(close_prices, p.get("ema_short", 9))
+        ema_m = Indicators.ema(close_prices, p.get("ema_mid", 21))
+        ema_l = Indicators.ema(close_prices, p.get("ema_long", 55))
+        ctx["ema_short"] = ema_s
+        ctx["ema_mid"] = ema_m
+        ctx["ema_long"] = ema_l
+
+        if ema_s and ema_m and ema_l:
+            if ema_s > ema_m > ema_l:
+                ctx["trend"] = "bullish"
+            elif ema_s < ema_m < ema_l:
+                ctx["trend"] = "bearish"
+            else:
+                ctx["trend"] = "neutral"
+        else:
+            ctx["trend"] = "unknown"
+
+        # RSI
+        rsi = Indicators.rsi(close_prices, p.get("rsi_period", 14))
+        ctx["rsi"] = rsi
+
+        # ADX
+        adx_period = p.get("adx_period", 14)
+        adx_data = Indicators.adx(ohlc, adx_period)
+        ctx["adx"] = adx_data.get("adx", 0) if adx_data else 0
+        ctx["adx_trending"] = bool(adx_data and adx_data.get("trending"))
+        ctx["plus_di"] = adx_data.get("plus_di", 0) if adx_data else 0
+        ctx["minus_di"] = adx_data.get("minus_di", 0) if adx_data else 0
+
+        # EMA slope (trend velocity)
+        ctx["ema_slope"] = Indicators.ema_slope(
+            close_prices, p.get("ema_mid", 21), 5
+        )
+
+        # MACD (trend confirmation)
+        macd_data = Indicators.macd(
+            close_prices,
+            p.get("macd_fast", 12),
+            p.get("macd_slow", 26),
+            p.get("macd_signal", 9),
+        )
+        if macd_data:
+            ctx["macd_histogram"] = macd_data.get("histogram", 0)
+            ctx["macd_crossover"] = macd_data.get("crossover", "none")
+        else:
+            ctx["macd_histogram"] = 0
+            ctx["macd_crossover"] = "none"
+
+        # Support / Resistance
+        sr = Indicators.support_resistance(ohlc)
+        ctx["support_resistance"] = sr
+
+        return ctx
+
     # ── Composite indicator set ─────────────────────────────────────────
 
     @staticmethod

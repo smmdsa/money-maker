@@ -1659,6 +1659,71 @@
         let selectedAgentId = null;
         let ws = null;
 
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus — Reactive event dispatcher (single source of truth)
+        //
+        // All price-dependent components subscribe here. Data flows:
+        //   Binance WS → backend broadcast → frontend WS → PriceBus.emit
+        //   Fallback REST → PriceBus.emit (only when WS is down)
+        //
+        // Events:
+        //   'tick'  → { prices: {coinId: price}, funding: {coinId: rate} }
+        //   'wsStatus' → { connected: bool }
+        // ══════════════════════════════════════════════════════════════════
+        const PriceBus = (() => {
+            const _listeners = {};       // event → Set<callback>
+            const _prices = {};          // coinId → price (latest)
+            const _funding = {};         // coinId → funding rate
+            let _wsConnected = false;
+            let _lastTickTs = 0;         // ms timestamp of last tick
+            let _tickCount = 0;
+
+            return {
+                // Subscribe to an event
+                on(event, cb) {
+                    if (!_listeners[event]) _listeners[event] = new Set();
+                    _listeners[event].add(cb);
+                },
+                // Unsubscribe
+                off(event, cb) {
+                    if (_listeners[event]) _listeners[event].delete(cb);
+                },
+                // Emit an event to all listeners
+                emit(event, data) {
+                    if (_listeners[event]) {
+                        for (const cb of _listeners[event]) {
+                            try { cb(data); } catch (e) { console.error(`PriceBus[${event}]:`, e); }
+                        }
+                    }
+                },
+                // Store + emit a price tick
+                tick(prices, funding) {
+                    Object.assign(_prices, prices);
+                    if (funding) Object.assign(_funding, funding);
+                    _lastTickTs = Date.now();
+                    _tickCount++;
+                    this.emit('tick', { prices: _prices, funding: _funding, source: _wsConnected ? 'ws' : 'rest' });
+                },
+                // Latest prices (read-only snapshot)
+                get prices() { return { ..._prices }; },
+                get funding() { return { ..._funding }; },
+                get lastTickTs() { return _lastTickTs; },
+                get tickCount() { return _tickCount; },
+                // WS connection status
+                get wsConnected() { return _wsConnected; },
+                setWsConnected(v) {
+                    _wsConnected = v;
+                    this.emit('wsStatus', { connected: v });
+                },
+                // Get price for a specific coinId
+                getPrice(coinId) { return _prices[coinId] || null; },
+                // Freshness in seconds
+                get freshnessSec() {
+                    return _lastTickTs > 0 ? ((Date.now() - _lastTickTs) / 1000) : Infinity;
+                },
+            };
+        })();
+
         // ── Smart price formatter ─────────────────────────────────────────
         // Shows more decimals for cheaper coins so small changes are visible
         function fmtPrice(price) {
@@ -1675,6 +1740,10 @@
         function initWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = function() {
+                PriceBus.setWsConnected(true);
+            };
             
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
@@ -1687,33 +1756,13 @@
                         loadDecisions(selectedAgentId);
                     }
                 } else if (data.type === 'price_update') {
-                    // Real-time price updates from Binance WebSocket (every 3s)
-                    updatePricesFromWS(data.prices, data.funding_rates || {});
-                    // Update WS badge
-                    const wsBadge = document.getElementById('wsBadge');
-                    if (wsBadge) {
-                        wsBadge.textContent = 'WS ✓';
-                        wsBadge.style.background = '#1b5e20';
-                        wsBadge.style.color = '#a5d6a7';
-                    }
-                    // Update chart candle
-                    if (typeof Charts !== 'undefined') {
-                        try {
-                            const coin = Charts.getCurrentCoin();
-                            if (data.prices[coin]) Charts.updateLastPrice(coin, data.prices[coin]);
-                        } catch (e) { /* silent */ }
-                    }
+                    // ── Emit through PriceBus — all listeners react ──
+                    PriceBus.tick(data.prices, data.funding_rates || {});
                 }
             };
             
             ws.onclose = function() {
-                // Update WS badge on disconnect
-                const wsBadge = document.getElementById('wsBadge');
-                if (wsBadge) {
-                    wsBadge.textContent = 'WS ✗';
-                    wsBadge.style.background = '#4a1414';
-                    wsBadge.style.color = '#ef9a9a';
-                }
+                PriceBus.setWsConnected(false);
                 // Reconnect after 5 seconds
                 setTimeout(initWebSocket, 5000);
             };
@@ -1732,8 +1781,11 @@
                     return;
                 }
                 
+                // Cache agents for reactive PnL updates
+                _cachedAgents = agents;
+
                 agentList.innerHTML = agents.map(agent => `
-                    <div class="agent-item ${selectedAgentId === agent.id ? 'selected' : ''}" onclick="selectAgent(${agent.id})">
+                    <div class="agent-item ${selectedAgentId === agent.id ? 'selected' : ''}" data-agent-id="${agent.id}" onclick="selectAgent(${agent.id})">
                         <div class="agent-name">${agent.name}</div>
                         <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span>
                         <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
@@ -1810,6 +1862,11 @@
                 `;
                 
                 document.getElementById('agentDetails').innerHTML = detailsHtml;
+
+                // Cache portfolio for live PnL updates via PriceBus
+                _lastPortfolio = agent.portfolio || [];
+                _lastAgentBalance = agent.current_balance || 0;
+                _lastAgentInitBal = agent.initial_balance || 0;
 
                 // Render positions in full-width section
                 renderPositions(agent);
@@ -2082,7 +2139,8 @@
             }
         }
         
-        // Load market prices
+        // Load market prices — builds the DOM grid initially (REST)
+        // After initial load, PriceBus 'tick' listener updates in-place
         async function loadMarketPrices() {
             try {
                 const response = await fetch('/api/market/prices');
@@ -2112,8 +2170,10 @@
                         const frClass = fr > 0 ? 'fr-positive' : fr < 0 ? 'fr-negative' : '';
                         fundingHtml = `<div class="funding-rate">FR: <span class="fr-value ${frClass}">${fr >= 0 ? '+' : ''}${fr.toFixed(4)}%</span></div>`;
                     }
+                    // Store coinId as data attribute for reactive updates
+                    const coinId = coin.id || coin.symbol.toLowerCase();
                     return `
-                    <div class="price-card">
+                    <div class="price-card" data-coin-id="${coinId}">
                         <div class="coin-name">${coin.symbol}</div>
                         <div class="coin-price">$${coin.current_price ? fmtPrice(coin.current_price) : 'N/A'}</div>
                         ${coin.price_change_24h ? `
@@ -2124,50 +2184,242 @@
                         ${fundingHtml}
                     </div>
                 `}).join('');
+
+                // Seed PriceBus with initial REST data (for fallback)
+                const priceMap = {};
+                const fundingMap = {};
+                prices.forEach(coin => {
+                    const coinId = coin.id || coin.symbol.toLowerCase();
+                    if (coin.current_price) priceMap[coinId] = coin.current_price;
+                    if (coin.funding_rate != null) fundingMap[coinId] = coin.funding_rate;
+                });
+                if (!PriceBus.wsConnected) {
+                    PriceBus.tick(priceMap, fundingMap);
+                }
             } catch (error) {
                 console.error('Error loading market prices:', error);
             }
         }
 
-        // Update price cards in-place from WebSocket data (no DOM rebuild)
-        function updatePricesFromWS(prices, fundingRates) {
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus Listener: Market Prices Grid — update cards in-place
+        // ══════════════════════════════════════════════════════════════════
+        function _onTickUpdatePriceGrid({ prices, funding }) {
             const cards = document.querySelectorAll('#marketPrices .price-card');
             cards.forEach(card => {
-                const nameEl = card.querySelector('.coin-name');
-                if (!nameEl) return;
-                const symbol = nameEl.textContent.trim();
-                // Find matching coin by symbol
-                for (const [coinId, price] of Object.entries(prices)) {
-                    const sym = coinId.replace(/-\d+$/, '').replace(/-/g, '').slice(0, 5).toUpperCase();
-                    // Match by Binance symbol map
-                    const coinSymbol = _wsSymbolMap[coinId];
-                    if (coinSymbol === symbol || sym === symbol) {
-                        const priceEl = card.querySelector('.coin-price');
-                        if (priceEl) {
-                            const newText = '$' + fmtPrice(price);
-                            if (priceEl.textContent !== newText) {
-                                priceEl.textContent = newText;
-                                // Flash animation
-                                priceEl.style.transition = 'color 0.3s';
-                                priceEl.style.color = '#00e5ff';
-                                setTimeout(() => { priceEl.style.color = ''; }, 600);
-                            }
-                        }
-                        // Update funding rate if available
-                        const fr = fundingRates[coinId];
-                        if (fr != null) {
-                            const frEl = card.querySelector('.fr-value');
-                            if (frEl) {
-                                const frPct = fr * 100;
-                                frEl.textContent = `${frPct >= 0 ? '+' : ''}${frPct.toFixed(4)}%`;
-                                frEl.className = `fr-value ${frPct > 0 ? 'fr-positive' : frPct < 0 ? 'fr-negative' : ''}`;
-                            }
-                        }
-                        break;
+                const coinId = card.dataset.coinId;
+                if (!coinId) return;
+
+                // Try direct coinId match first, then symbol map
+                let price = prices[coinId];
+                if (price == null) {
+                    // Fallback: try symbol-based matching
+                    const nameEl = card.querySelector('.coin-name');
+                    if (!nameEl) return;
+                    const symbol = nameEl.textContent.trim();
+                    for (const [pid, p] of Object.entries(prices)) {
+                        if (_wsSymbolMap[pid] === symbol) { price = p; break; }
+                    }
+                }
+                if (price == null) return;
+
+                const priceEl = card.querySelector('.coin-price');
+                if (priceEl) {
+                    const newText = '$' + fmtPrice(price);
+                    if (priceEl.textContent !== newText) {
+                        priceEl.textContent = newText;
+                        // Flash animation
+                        priceEl.style.transition = 'color 0.3s';
+                        priceEl.style.color = '#00e5ff';
+                        setTimeout(() => { priceEl.style.color = ''; }, 600);
+                    }
+                }
+
+                // Update funding rate
+                const fr = funding[coinId];
+                if (fr != null) {
+                    const frEl = card.querySelector('.fr-value');
+                    if (frEl) {
+                        const frPct = fr * 100;
+                        frEl.textContent = `${frPct >= 0 ? '+' : ''}${frPct.toFixed(4)}%`;
+                        frEl.className = `fr-value ${frPct > 0 ? 'fr-positive' : frPct < 0 ? 'fr-negative' : ''}`;
                     }
                 }
             });
         }
+
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus Listener: Candlestick Chart — update last candle
+        // ══════════════════════════════════════════════════════════════════
+        function _onTickUpdateChart({ prices }) {
+            if (typeof Charts === 'undefined') return;
+            try {
+                const coin = Charts.getCurrentCoin();
+                if (prices[coin]) Charts.updateLastPrice(coin, prices[coin]);
+            } catch (e) { /* silent */ }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus Listener: Open Positions — live PnL recalculation
+        //
+        // Stores last agent portfolio so price ticks recalculate PnL
+        // without waiting for the 60s REST poll.
+        // ══════════════════════════════════════════════════════════════════
+        let _lastPortfolio = [];      // Cached from loadAgentDetails (selected agent)
+        let _lastAgentBalance = 0;    // current_balance (selected agent)
+        let _lastAgentInitBal = 0;    // initial_balance (selected agent)
+        let _cachedAgents = [];       // All agents from loadAgents() — for reactive PnL
+
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus Listener: ALL Agent Items — recalculate P/L for every
+        // agent in the list, not just the selected one.
+        //
+        // Uses _cachedAgents (from loadAgents()) which now includes
+        // lightweight position data (symbol, amount, entry, side, margin).
+        // ══════════════════════════════════════════════════════════════════
+        function _onTickUpdateAllAgents({ prices }) {
+            if (!_cachedAgents.length) return;
+
+            _cachedAgents.forEach(agent => {
+                const positions = agent.positions || [];
+                if (!positions.length) return;
+
+                // Recalculate portfolio value from live prices
+                let portfolioValue = 0;
+                let hasPriceData = false;
+
+                positions.forEach(pos => {
+                    const coinId = _symbolToCoinId[pos.symbol];
+                    const livePrice = coinId ? prices[coinId] : null;
+                    if (!livePrice) {
+                        portfolioValue += pos.margin;  // No price → keep margin as-is
+                        return;
+                    }
+                    hasPriceData = true;
+                    const isLong = pos.position_type === 'long';
+                    const priceDiff = isLong
+                        ? (livePrice - pos.avg_buy_price)
+                        : (pos.avg_buy_price - livePrice);
+                    portfolioValue += pos.margin + (priceDiff * pos.amount);
+                });
+
+                if (!hasPriceData) return;  // No live prices available for this agent
+
+                const totalValue = agent.current_balance + portfolioValue;
+                const totalPL = totalValue - agent.initial_balance;
+                const totalPLPct = agent.initial_balance > 0
+                    ? (totalPL / agent.initial_balance * 100) : 0;
+
+                // Update agent list item DOM
+                const agentItem = document.querySelector(`.agent-item[data-agent-id="${agent.id}"]`);
+                if (!agentItem) return;
+
+                // Update P/L value
+                const statsDiv = agentItem.querySelector('.agent-stats > div:last-child');
+                if (statsDiv) {
+                    const sign = totalPL >= 0 ? '+' : '';
+                    statsDiv.textContent = `${sign}${totalPL.toFixed(2)} (${totalPLPct.toFixed(2)}%)`;
+                    statsDiv.className = totalPL >= 0 ? 'profit' : 'loss';
+                }
+
+                // Update Total Value
+                const totalValDiv = agentItem.querySelector('.agent-stats > div:first-child strong');
+                if (totalValDiv) {
+                    totalValDiv.textContent = `Total Value: $${totalValue.toFixed(2)}`;
+                }
+            });
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus Listener: Open Positions Section (selected agent)
+        //
+        // Updates position cards: current price, PnL, progress bar
+        // ══════════════════════════════════════════════════════════════════
+        function _onTickUpdatePositions({ prices }) {
+            if (!_lastPortfolio.length) return;
+
+            const container = document.getElementById('positionsContainer');
+            if (!container) return;
+
+            const posCards = container.querySelectorAll('.pos-card');
+            if (!posCards.length) return;
+
+            posCards.forEach((card, idx) => {
+                const pos = _lastPortfolio[idx];
+                if (!pos) return;
+
+                // Find matching price by symbol → coinId
+                const coinId = _symbolToCoinId[pos.symbol];
+                const livePrice = coinId ? prices[coinId] : null;
+                if (!livePrice) return;
+
+                // Update current price display
+                const spans = card.querySelectorAll('.pos-meta span');
+                spans.forEach(span => {
+                    if (span.textContent.includes('Current:')) {
+                        const strong = span.querySelector('strong');
+                        if (strong) {
+                            strong.textContent = '$' + fmtPrice(livePrice);
+                            strong.style.transition = 'color 0.3s';
+                            strong.style.color = '#00e5ff';
+                            setTimeout(() => { strong.style.color = ''; }, 600);
+                        }
+                    }
+                });
+
+                // Recalculate PnL
+                const isLong = pos.position_type === 'long';
+                const priceDiff = isLong
+                    ? (livePrice - pos.avg_buy_price)
+                    : (pos.avg_buy_price - livePrice);
+                const pnl = priceDiff * pos.amount;
+                const pnlPct = pos.margin > 0 ? (pnl / pos.margin) * 100 : 0;
+
+                // Update PnL display
+                const pnlValueEl = card.querySelector('.pnl-value');
+                const pnlPctEl = card.querySelector('.pnl-pct');
+                if (pnlValueEl) {
+                    const sign = pnl >= 0 ? '+' : '';
+                    pnlValueEl.textContent = `${sign}$${pnl.toFixed(4)}`;
+                    pnlValueEl.className = `pnl-value ${pnl >= 0 ? 'profit' : 'loss'}`;
+                }
+                if (pnlPctEl) {
+                    const sign = pnlPct >= 0 ? '+' : '';
+                    pnlPctEl.textContent = `${sign}${pnlPct.toFixed(2)}%`;
+                    pnlPctEl.className = `pnl-pct ${pnlPct >= 0 ? 'profit' : 'loss'}`;
+                }
+
+                // Update progress bar
+                if (pos.stop_loss_price > 0 && pos.take_profit_price > 0) {
+                    const range = Math.abs(pos.take_profit_price - pos.stop_loss_price);
+                    if (range > 0) {
+                        const fromSL = isLong
+                            ? (livePrice - pos.stop_loss_price)
+                            : (pos.stop_loss_price - livePrice);
+                        const progressPct = Math.max(0, Math.min(100, (fromSL / range) * 100));
+                        const barColor = progressPct > 60 ? '#4caf50' : progressPct > 30 ? '#ff9800' : '#f44336';
+                        const barFill = card.querySelector('.bar-fill');
+                        if (barFill) {
+                            barFill.style.width = progressPct + '%';
+                            barFill.style.background = barColor;
+                        }
+                    }
+                }
+            });
+        }
+
+        // Symbol → CoinGecko ID reverse map (for position price matching)
+        const _symbolToCoinId = {
+            'BTC': 'bitcoin', 'ETH': 'ethereum', 'BNB': 'binancecoin',
+            'ADA': 'cardano', 'SOL': 'solana', 'XRP': 'ripple',
+            'DOT': 'polkadot', 'DOGE': 'dogecoin', 'AVAX': 'avalanche-2',
+            'LINK': 'chainlink', 'NEAR': 'near', 'SUI': 'sui',
+            '1000PEPE': 'pepe', 'APT': 'aptos', 'ARB': 'arbitrum',
+            'FIL': 'filecoin', 'RENDER': 'render-token',
+            'INJ': 'injective-protocol', 'FET': 'fetch-ai',
+            '1000BONK': 'bonk', '1000FLOKI': 'floki',
+            'SEI': 'sei-network', 'WIF': 'wif',
+        };
 
         // CoinGecko ID → display symbol mapping (for WS price matching)
         const _wsSymbolMap = {
@@ -2181,6 +2433,47 @@
             'bonk': '1000BONK', 'floki': '1000FLOKI',
             'sei-network': 'SEI', 'wif': 'WIF',
         };
+
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus Listener: WS Status Badge + Data Source Badge
+        // ══════════════════════════════════════════════════════════════════
+        function _onWsStatusChange({ connected }) {
+            const wsBadge = document.getElementById('wsBadge');
+            if (wsBadge) {
+                if (connected) {
+                    wsBadge.textContent = 'WS ✓';
+                    wsBadge.style.background = '#1b5e20';
+                    wsBadge.style.color = '#a5d6a7';
+                } else {
+                    wsBadge.textContent = 'WS ✗';
+                    wsBadge.style.background = '#4a1414';
+                    wsBadge.style.color = '#ef9a9a';
+                }
+            }
+            // Update data source badge when WS becomes active
+            const badge = document.getElementById('dataSourceBadge');
+            if (badge && connected) {
+                badge.textContent = 'via Binance WebSocket';
+                badge.style.background = '#e8f5e9';
+                badge.style.color = '#2e7d32';
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // PriceBus Listener: Freshness indicator (replaces countdown timer)
+        // ══════════════════════════════════════════════════════════════════
+        function _onTickUpdateFreshness() {
+            if (PriceBus.wsConnected) {
+                // WS mode: show live indicator instead of countdown
+                const textEl = document.getElementById('priceCountdownText');
+                const barEl = document.getElementById('priceCountdownBar');
+                if (textEl) textEl.textContent = 'LIVE';
+                if (barEl) {
+                    barEl.style.width = '100%';
+                    barEl.style.background = '#4caf50';
+                }
+            }
+        }
         
         // Load news
         async function loadNews() {
@@ -2654,7 +2947,7 @@
         }
         
         // ── Countdown Timer ──────────────────────────────────────────────
-        const PRICE_REFRESH = 15;   // seconds — Binance allows fast polling
+        const PRICE_REFRESH = 15;   // seconds — REST fallback interval
         const NEWS_REFRESH  = 60;   // seconds — RSS feeds don't update faster
         const AGENT_REFRESH  = 60;  // seconds — matches trading cycle
         let priceSecondsLeft = PRICE_REFRESH;
@@ -2664,21 +2957,31 @@
             const textEl = document.getElementById(id);
             const barEl = document.getElementById(barId);
             if (textEl) textEl.textContent = `${secondsLeft}s`;
-            if (barEl) barEl.style.width = `${(secondsLeft / maxSeconds) * 100}%`;
+            if (barEl) {
+                barEl.style.width = `${(secondsLeft / maxSeconds) * 100}%`;
+                barEl.style.background = '';  // Reset to default color
+            }
         }
 
         function startCountdownTick() {
             setInterval(() => {
-                priceSecondsLeft = Math.max(0, priceSecondsLeft - 1);
+                // Price countdown only ticks in REST fallback mode
+                if (!PriceBus.wsConnected) {
+                    priceSecondsLeft = Math.max(0, priceSecondsLeft - 1);
+                    updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft, PRICE_REFRESH);
+                }
+                // else: PriceBus 'tick' listener shows LIVE indicator
+
                 newsSecondsLeft = Math.max(0, newsSecondsLeft - 1);
-                updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft, PRICE_REFRESH);
                 updateCountdown('newsCountdownText', 'newsCountdownBar', newsSecondsLeft, NEWS_REFRESH);
             }, 1000);
         }
 
         function resetPriceCountdown() {
             priceSecondsLeft = PRICE_REFRESH;
-            updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft, PRICE_REFRESH);
+            if (!PriceBus.wsConnected) {
+                updateCountdown('priceCountdownText', 'priceCountdownBar', priceSecondsLeft, PRICE_REFRESH);
+            }
         }
 
         function resetNewsCountdown() {
@@ -3081,22 +3384,16 @@
         }
 
         // ── Refresh cycle ─────────────────────────────────────────────────
+        // REST polling is now only a FALLBACK when WebSocket is disconnected.
+        // When WS is active, PriceBus listeners handle all live updates.
         async function refreshPrices() {
+            if (PriceBus.wsConnected && PriceBus.freshnessSec < 10) {
+                // WS is active and data is fresh — skip REST entirely
+                return;
+            }
+            // Fallback: load via REST (also seeds PriceBus)
             await loadMarketPrices();
             resetPriceCountdown();
-
-            // Update chart last candle with fresh price
-            if (typeof Charts !== 'undefined') {
-                try {
-                    const coin = Charts.getCurrentCoin();
-                    const resp = await fetch(`/api/market/${coin}`);
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        const price = data.current_price || data.price;
-                        if (price) Charts.updateLastPrice(coin, price);
-                    }
-                } catch (e) { /* silent */ }
-            }
         }
 
         async function refreshNews() {
@@ -3106,10 +3403,19 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
+            // ── Register PriceBus listeners ──────────────────────────────
+            PriceBus.on('tick', _onTickUpdatePriceGrid);     // Market Prices grid
+            PriceBus.on('tick', _onTickUpdateChart);          // Candlestick chart
+            PriceBus.on('tick', _onTickUpdateAllAgents);      // ALL agent items P/L
+            PriceBus.on('tick', _onTickUpdatePositions);      // Open Positions cards
+            PriceBus.on('tick', _onTickUpdateFreshness);      // Freshness indicator
+            PriceBus.on('wsStatus', _onWsStatusChange);       // WS badge + data source
+
+            // ── Initial data load (REST) ────────────────────────────────
             loadAgents();
-            refreshPrices();
+            refreshPrices();    // Will always REST on first load (WS not connected yet)
             refreshNews();
-            initWebSocket();
+            initWebSocket();    // Connect WS → PriceBus takes over
             startCountdownTick();
 
             // Market clocks
@@ -3123,12 +3429,13 @@
                 Charts.loadOHLC('bitcoin', 14);
             }
 
-            // Refresh prices every 15 seconds (Binance allows it)
+            // REST fallback polling — only active when WS is down
             setInterval(refreshPrices, PRICE_REFRESH * 1000);
-            // Refresh news every 60 seconds (RSS feeds are slow)
+            // News still needs REST (no WS equivalent)
             setInterval(refreshNews, NEWS_REFRESH * 1000);
 
             // Refresh agents & selected details every 60 seconds (trading cycle)
+            // This handles trade/decision data not available via WS ticks
             setInterval(() => {
                 loadAgents();
                 if (selectedAgentId) {

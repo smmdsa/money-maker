@@ -71,7 +71,9 @@ class BinanceWSManager:
 
         # ── Active kline subscriptions ────────────────────────────────────
         self._kline_streams: Set[str] = set()           # btcusdt@kline_5m
-
+        # ── Price tick callbacks (event-driven risk monitor) ─────────
+        self._price_callbacks = []
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         # ── Stats ─────────────────────────────────────────────────────────
         self._messages_received = 0
         self._connection_count = 0
@@ -86,6 +88,7 @@ class BinanceWSManager:
         if self._running:
             return
         self._running = True
+        self._loop = asyncio.get_running_loop()
         self._task = asyncio.create_task(self._connection_loop())
         logger.info("🔌 Binance WebSocket manager started")
 
@@ -206,9 +209,12 @@ class BinanceWSManager:
         """Process !markPrice@arr — all mark prices at once (every 1s).
 
         Each item: {s: symbol, p: markPrice, i: indexPrice, r: fundingRate, ...}
+        Fires registered price callbacks after updating caches (outside lock).
         """
         if not isinstance(data, list):
             data = [data]
+
+        updated: Dict[str, float] = {}
 
         with self._lock:
             for item in data:
@@ -219,6 +225,7 @@ class BinanceWSManager:
                     price = float(item.get("p", 0))
                     if price > 0:
                         self._mark_prices[symbol] = price
+                        updated[symbol] = price
 
                     funding = item.get("r")
                     if funding is not None:
@@ -229,6 +236,14 @@ class BinanceWSManager:
                         self._index_prices[symbol] = float(idx)
                 except (ValueError, TypeError):
                     continue
+
+        # Fire callbacks OUTSIDE the lock — subscribers do their own filtering
+        if updated and self._price_callbacks:
+            for cb in self._price_callbacks:
+                try:
+                    cb(updated)
+                except Exception as e:
+                    logger.error(f"Price tick callback error: {e}")
 
     def _on_kline(self, data):
         """Process individual kline (candlestick) update.
@@ -305,6 +320,27 @@ class BinanceWSManager:
         with self._lock:
             d = self._kline_data.get(key)
             return dict(d) if d else None
+
+    # ── Price Tick Callbacks (event-driven subscribers) ────────────────
+
+    def on_price_tick(self, callback):
+        """Register a callback invoked on each mark price batch (1s).
+
+        Callback signature: callback(prices: Dict[str, float])
+          - prices: {"BTCUSDT": 97000.0, "ETHUSDT": 3200.0, ...}
+          - Runs on the asyncio event loop thread — must be fast.
+        """
+        if callback not in self._price_callbacks:
+            self._price_callbacks.append(callback)
+            logger.info(f"WS: registered price tick callback ({len(self._price_callbacks)} total)")
+
+    def remove_price_tick(self, callback):
+        """Remove a previously registered price tick callback."""
+        try:
+            self._price_callbacks.remove(callback)
+            logger.info(f"WS: removed price tick callback ({len(self._price_callbacks)} remaining)")
+        except ValueError:
+            pass
 
     # ── Connection State ──────────────────────────────────────────────────
 
@@ -419,4 +455,5 @@ class BinanceWSManager:
             "connection_count": self._connection_count,
             "errors": self._errors,
             "prices_fresh": self.prices_available,
+            "price_callbacks": len(self._price_callbacks),
         }

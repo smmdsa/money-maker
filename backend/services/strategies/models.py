@@ -148,10 +148,11 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         key="scalper_15m",
         name="Scalper Pro 15m",
         description="Swing scalper on 15m candles with RSI(12), MACD(10,22,8), BB(18). "
-                    "Requires ≥4 score layers. Trail 3× ATR. "
-                    "ADX filter + counter-trend penalty. 2.5:1 R:R.",
+                    "High-quality entries: min_score 6 + ADX trending gate + "
+                    "leading indicator conflict filter. No BB squeeze scoring. "
+                    "ATR-adaptive stops with 2.3:1 R:R.",
         style="scalping",
-        default_leverage=3,
+        default_leverage=4,
         max_leverage=5,
         max_positions=3,
         risk_per_trade_pct=2.5,

@@ -19,7 +19,7 @@ from backend.services.strategies import (
     StrategyEngine, Indicators, STRATEGIES,
     calculate_position_size, calculate_liquidation_price, Signal,
 )
-from backend.services.strategies.indicators import SCALP_PROFILES
+from backend.services.strategies.indicators import SCALP_PROFILES, Indicators
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,21 @@ TAKER_FEE_PCT = 0.05     # 0.05% per side (market orders)
 MAKER_FEE_PCT = 0.02     # 0.02% per side (limit orders)
 FUNDING_RATE_PCT = 0.01  # 0.01% every 8 hours (typical)
 FUNDING_INTERVAL_H = 8   # funding rate applied every N hours
+
+# ── Pessimistic Simulation Model (HFT best practice) ────────────────────────
+# Slippage: adverse price movement on taker/market orders, simulating
+# the latency gap between signal (candle close) and execution (~200ms).
+# On highly liquid pairs (BTC/ETH) real slippage is ~0.01-0.03%;
+# we use 0.05% as pessimistic estimate for realistic backtesting.
+SLIPPAGE_PCT = 0.05      # 0.05% adverse slippage on entries & SL exits
+
+# Circuit breaker: emergency stop if daily loss exceeds threshold.
+# Professional desks use 2-5%; we use 3% as a safe default.
+CIRCUIT_BREAKER_DAILY_LOSS_PCT = 3.0  # halt trading after 3% daily loss
+
+# Volatility filter: pause entries when ATR spikes above N× its rolling mean.
+# Prevents trading during flash crashes, news bombs, and abnormal spreads.
+VOLATILITY_SPIKE_MULT = 2.5  # ATR > 2.5× rolling average = volatility spike
 
 # Interval → hours per candle (for funding rate calculation)
 _INTERVAL_HOURS = {
@@ -184,6 +199,79 @@ _SCALPER_INTERVALS = {
     "scalper":     ("1h",  24,   180),  # 24 candles/day,   max 180d
 }
 
+# ── Multi-Timeframe (MTF) Scalper Configuration ───────────────────────────
+# Elder Triple Screen adapted for crypto scalping:
+#   signal_tf    — native candle where signals are evaluated
+#   trend_tf     — higher TF for trend context + S/R
+#   confirm_tf   — mid TF for confirmation
+#   resample_ratio — how many signal candles = 1 trend candle
+#   confirm_ratio  — how many signal candles = 1 confirm candle
+#   trend_profile  — SCALP_PROFILES key (or defaults) for trend TF indicators
+#   confirm_profile — SCALP_PROFILES key for confirmation TF indicators
+
+_MTF_CONFIG = {
+    "scalper_1m": {
+        "signal_tf": "1m",
+        "trend_tf": "5m",      "resample_ratio": 5,
+        "confirm_tf": "3m",    "confirm_ratio": 3,
+        "trend_profile": "scalper_5m",
+        "confirm_profile": "scalper_3m",
+    },
+    "scalper_3m": {
+        "signal_tf": "3m",
+        "trend_tf": "15m",     "resample_ratio": 5,
+        "confirm_tf": "5m",    "confirm_ratio": None,
+        "trend_profile": "scalper_15m",
+        "confirm_profile": "scalper_5m",
+    },
+    "scalper_5m": {
+        "signal_tf": "5m",
+        "trend_tf": "15m",     "resample_ratio": 3,
+        "confirm_tf": "1m",    "confirm_ratio": None,
+        "trend_profile": "scalper_15m",
+        "confirm_profile": "scalper_1m",
+    },
+    "scalper_15m": {
+        "signal_tf": "15m",
+        "trend_tf": "1h",      "resample_ratio": 4,
+        "confirm_tf": "5m",    "confirm_ratio": None,
+        "trend_profile": "scalper",
+        "confirm_profile": "scalper_5m",
+    },
+    "scalper": {
+        "signal_tf": "1h",
+        "trend_tf": "4h",      "resample_ratio": 4,
+        "confirm_tf": "15m",   "confirm_ratio": None,
+        "trend_profile": None,  # use defaults (14-period everything)
+        "confirm_profile": "scalper_15m",
+    },
+}
+
+
+def _resample_candles(candles: List[Dict], ratio: int) -> List[Dict]:
+    """Resample smaller candles into larger ones by grouping.
+
+    E.g. ratio=4 groups every 4 candles into 1 (1m→4m, 15m→1h, etc.).
+    Incomplete final group is included if it has any candles.
+    """
+    if ratio <= 1 or not candles:
+        return list(candles)
+
+    resampled = []
+    for start in range(0, len(candles), ratio):
+        group = candles[start:start + ratio]
+        if not group:
+            break
+        resampled.append({
+            "timestamp": group[0]["timestamp"],
+            "open": group[0]["open"],
+            "high": max(c["high"] for c in group),
+            "low": min(c["low"] for c in group),
+            "close": group[-1]["close"],
+            "volume": sum(c.get("volume", 0) for c in group),
+        })
+    return resampled
+
 
 def _get_kline_config(period_days: int, strategy_key: str = "") -> tuple:
     """Choose interval and total candles needed for backtesting.
@@ -300,6 +388,32 @@ class Backtester:
         first_price = klines[warmup]["close"]
         last_price = klines[-1]["close"]
 
+        # --- Circuit breaker: max daily loss tracker ---
+        day_start_equity = initial_balance
+        last_day_str = klines[warmup]["timestamp"][:10]  # "YYYY-MM-DD"
+        circuit_breaker_active = False
+
+        # --- Volatility filter: rolling ATR mean for spike detection ---
+        atr_history: List[float] = []
+        atr_rolling_len = 50  # rolling window for ATR mean
+
+        # --- MTF: Pre-compute resampled candles for higher timeframe ---
+        mtf_cfg = _MTF_CONFIG.get(strategy_key)
+        htf_candles = None       # resampled trend-TF candles (list of dicts)
+        htf_ratio = 0            # how many native candles = 1 HTF candle
+        htf_profile_key = None   # SCALP_PROFILES key for HTF indicators
+        htf_indicator_window = 200  # how many HTF candles for indicator calc
+
+        if mtf_cfg and strategy_key.startswith("scalper"):
+            htf_ratio = mtf_cfg["resample_ratio"]
+            htf_profile_key = mtf_cfg.get("trend_profile")
+            if htf_ratio and htf_ratio > 1:
+                htf_candles = _resample_candles(klines, htf_ratio)
+                logger.info(
+                    f"MTF: resampled {len(klines)} native candles → "
+                    f"{len(htf_candles)} HTF candles (ratio {htf_ratio})"
+                )
+
         # --- Main loop: iterate candle by candle ---
         # Use a sliding window for indicator computation (O(n) instead of O(n²))
         # 200 candles is enough for all indicators (longest: EMA-55 + ADX warm-up)
@@ -360,6 +474,51 @@ class Backtester:
             except Exception:
                 continue
 
+            # --- Circuit breaker: daily loss limit ---
+            current_day_str = ts[:10]
+            if current_day_str != last_day_str:
+                # New day → reset circuit breaker
+                equity_now = balance + (self._calc_pnl(position, close) + position.margin if position else 0)
+                day_start_equity = equity_now
+                last_day_str = current_day_str
+                circuit_breaker_active = False
+            if not circuit_breaker_active and strategy_key.startswith("scalper"):
+                equity_now = balance + (self._calc_pnl(position, close) + position.margin if position else 0)
+                daily_pnl_pct = (equity_now - day_start_equity) / day_start_equity * 100 if day_start_equity > 0 else 0
+                if daily_pnl_pct < -CIRCUIT_BREAKER_DAILY_LOSS_PCT:
+                    circuit_breaker_active = True
+
+            # --- Volatility filter: detect ATR spikes ---
+            volatility_spike = False
+            cur_atr_pct = indicators.get("atr_pct")
+            if cur_atr_pct and strategy_key.startswith("scalper"):
+                atr_history.append(cur_atr_pct)
+                if len(atr_history) > atr_rolling_len:
+                    atr_history.pop(0)
+                if len(atr_history) >= 20:
+                    atr_mean = sum(atr_history) / len(atr_history)
+                    if cur_atr_pct > atr_mean * VOLATILITY_SPIKE_MULT:
+                        volatility_spike = True
+
+            # --- Compute MTF (higher-timeframe) context ---
+            mtf_context = None
+            if htf_candles and htf_ratio > 1:
+                # Map native candle index → HTF candle index
+                htf_idx = i // htf_ratio
+                # Sliding window of HTF candles for indicator computation
+                htf_win_start = max(0, htf_idx + 1 - htf_indicator_window)
+                htf_win_end = min(htf_idx + 1, len(htf_candles))
+                if htf_win_end - htf_win_start >= 30:  # need minimum data
+                    htf_slice = htf_candles[htf_win_start:htf_win_end]
+                    htf_closes = [c["close"] for c in htf_slice]
+                    htf_profile = SCALP_PROFILES.get(htf_profile_key, {})
+                    try:
+                        mtf_context = Indicators.compute_htf_context(
+                            htf_closes, htf_slice, close, htf_profile
+                        )
+                    except Exception:
+                        mtf_context = None
+
             # --- Evaluate strategy ---
             has_long = position is not None and position.direction == "long"
             has_short = position is not None and position.direction == "short"
@@ -367,7 +526,8 @@ class Backtester:
 
             signal = self.engine.evaluate(
                 strategy_key, indicators, close,
-                has_long, has_short, entry_price
+                has_long, has_short, entry_price,
+                mtf_context=mtf_context,
             )
 
             # --- Act on signal ---
@@ -376,7 +536,10 @@ class Backtester:
                 cooldown_left -= 1
 
             if position is None and signal.direction in ("long", "short"):
-                if cooldown_left <= 0 and signal.confidence >= cfg.min_confidence:
+                if (cooldown_left <= 0
+                        and signal.confidence >= cfg.min_confidence
+                        and not circuit_breaker_active
+                        and not volatility_spike):
                     result = self._open_position(
                         signal, close, leverage, strategy_key,
                         balance, ts, trades, trailing_enabled
@@ -588,17 +751,25 @@ class Backtester:
         # Commission on entry
         open_fee = position_value * (TAKER_FEE_PCT / 100)
 
-        liq = calculate_liquidation_price(price, leverage, direction)
+        # ── Slippage simulation (pessimistic entry) ──────────────────
+        # In reality, the signal fires on candle close but execution
+        # happens ~200ms later at a slightly worse price.
         if direction == "long":
-            sl = price * (1 - signal.stop_loss_pct / 100)
-            tp = price * (1 + signal.take_profit_pct / 100)
+            exec_price = price * (1 + SLIPPAGE_PCT / 100)   # buy higher
         else:
-            sl = price * (1 + signal.stop_loss_pct / 100)
-            tp = price * (1 - signal.take_profit_pct / 100)
+            exec_price = price * (1 - SLIPPAGE_PCT / 100)   # sell lower
+
+        liq = calculate_liquidation_price(exec_price, leverage, direction)
+        if direction == "long":
+            sl = exec_price * (1 - signal.stop_loss_pct / 100)
+            tp = exec_price * (1 + signal.take_profit_pct / 100)
+        else:
+            sl = exec_price * (1 + signal.stop_loss_pct / 100)
+            tp = exec_price * (1 - signal.take_profit_pct / 100)
 
         trades.append(BacktestTrade(
             trade_type=f"open_{direction}",
-            timestamp=ts, price=price,
+            timestamp=ts, price=exec_price,
             amount=amount, margin=margin,
             leverage=leverage,
             total_value=position_value,
@@ -608,7 +779,7 @@ class Backtester:
 
         pos = _Position(
             direction=direction,
-            entry_price=price,
+            entry_price=exec_price,
             amount=amount,
             margin=margin,
             leverage=leverage,
@@ -616,7 +787,7 @@ class Backtester:
             take_profit=tp,
             liquidation=liq,
             initial_sl=sl,
-            best_price=price,
+            best_price=exec_price,
             # trail_pct < 0 means strategy explicitly disabled trailing
             trail_pct=(
                 0 if (not trailing_enabled

@@ -37,11 +37,22 @@ class StrategyEngine:
     def evaluate(self, strategy_key: str, indicators: Dict,
                  current_price: float, has_long: bool = False,
                  has_short: bool = False,
-                 entry_price: float = 0.0) -> Signal:
-        """Route evaluation to the correct strategy."""
+                 entry_price: float = 0.0,
+                 mtf_context: Dict = None) -> Signal:
+        """Route evaluation to the correct strategy.
+
+        mtf_context — optional higher-timeframe context dict produced by
+        Indicators.compute_htf_context().  Passed through to strategies
+        that support it (currently ScalperStrategy).
+        """
         strategy = self._instances.get(strategy_key,
                                        self._instances["confluence_master"])
         try:
+            # Pass mtf_context to scalper variants that accept it
+            if mtf_context and hasattr(strategy, 'evaluate') and strategy_key.startswith("scalper"):
+                return strategy.evaluate(indicators, current_price,
+                                         has_long, has_short, entry_price,
+                                         mtf_context=mtf_context)
             return strategy.evaluate(indicators, current_price,
                                      has_long, has_short, entry_price)
         except Exception as e:

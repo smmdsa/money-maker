@@ -28,6 +28,7 @@ from backend.services.strategies import STRATEGIES
 from backend.services.backtester import Backtester
 from backend.services.ws_monitor import BinanceWSManager
 from backend.services.market_data import BinanceProvider
+from backend.services.risk_monitor import ReactiveRiskMonitor
 from pydantic import BaseModel
 
 # Configure logging
@@ -48,6 +49,9 @@ market_service.set_ws_manager(ws_manager)
 
 # Scheduler for background tasks
 scheduler = AsyncIOScheduler()
+
+# Reactive risk monitor (initialized at startup, needs trading_lock)
+reactive_monitor: Optional[ReactiveRiskMonitor] = None
 
 # Global lock: serializes ALL trading/risk operations so the trading cycle
 # (60s) and risk monitor (5s) never modify agent balances concurrently.
@@ -176,6 +180,19 @@ def list_agents(db: Session = Depends(get_db)):
         profit_loss = total_value - agent.initial_balance
         profit_loss_pct = (profit_loss / agent.initial_balance * 100) if agent.initial_balance > 0 else 0
         
+        # Lightweight positions for frontend reactive PnL recalculation
+        positions = []
+        for item in agent.portfolio:
+            if item.amount > 0:
+                positions.append({
+                    "symbol": item.symbol,
+                    "amount": item.amount,
+                    "avg_buy_price": item.avg_buy_price,
+                    "position_type": item.position_type,
+                    "margin": item.margin,
+                    "leverage": item.leverage,
+                })
+
         result.append({
             "id": agent.id,
             "name": agent.name,
@@ -188,7 +205,8 @@ def list_agents(db: Session = Depends(get_db)):
             "status": agent.status,
             "strategy": agent.strategy,
             "max_leverage": agent.max_leverage,
-            "open_positions": len([p for p in agent.portfolio if p.amount > 0]),
+            "open_positions": len(positions),
+            "positions": positions,
             "created_at": agent.created_at.isoformat(),
             "updated_at": agent.updated_at.isoformat()
         })
@@ -281,6 +299,9 @@ def close_position(agent_id: int, position_id: int, db: Session = Depends(get_db
             db.refresh(agent)
             db.refresh(pos)
             result = trading_service.close_position_manual(agent, pos, db)
+        # Refresh reactive watchlist immediately after close
+        if reactive_monitor:
+            reactive_monitor.refresh()
         return {"status": "closed", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -304,6 +325,9 @@ def close_all_positions(agent_id: int, db: Session = Depends(get_db)):
                 results.append(result)
             except Exception as e:
                 results.append({"coin": pos.cryptocurrency, "error": str(e)})
+    # Refresh reactive watchlist immediately after close-all
+    if reactive_monitor:
+        reactive_monitor.refresh()
     return {"status": "closed", "count": len(results), "results": results}
 
 
@@ -322,6 +346,10 @@ def update_agent(agent_id: int, update: AgentUpdate, db: Session = Depends(get_d
     
     db.commit()
     db.refresh(agent)
+    
+    # Agent status change may affect reactive watchlist (paused/stopped agents excluded)
+    if reactive_monitor and update.status:
+        reactive_monitor.refresh()
     
     return {"message": "Agent updated successfully", "status": agent.status}
 
@@ -750,6 +778,10 @@ async def run_trading_cycle():
     # Run all blocking I/O in a thread so we don't block the event loop
     decisions = await asyncio.to_thread(_sync_trading_cycle)
 
+    # Refresh reactive watchlist — trading cycle may have opened/closed positions
+    if reactive_monitor:
+        reactive_monitor.refresh()
+
     # Broadcast results back on the event loop
     for agent_id, agent_name, decision in (decisions or []):
         await manager.broadcast({
@@ -769,6 +801,7 @@ def health_check():
         "market_service": market_service.health_check(),
         "llm_service": llm_service.health_check(),
         "websocket": ws_manager.health_check(),
+        "reactive_risk": reactive_monitor.health_check() if reactive_monitor else None,
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -964,7 +997,30 @@ async def startup_event():
 
     # Start Binance WebSocket for real-time market data
     await ws_manager.start()
-    
+
+    # Start event-driven reactive risk monitor
+    # Reacts to each WS price tick (1s) instead of polling every 5s.
+    # The 5s scheduler remains as a defense-in-depth safety net.
+    global reactive_monitor
+
+    async def _broadcast_risk_action(action: dict):
+        """Broadcast reactive risk actions to frontend clients."""
+        await manager.broadcast({
+            "type": "risk_alert",
+            "decision": action,
+            "source": "reactive",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+    reactive_monitor = ReactiveRiskMonitor(
+        trading_service=trading_service,
+        ws_manager=ws_manager,
+        get_db=get_db,
+        trading_lock=_trading_lock,
+        broadcast_fn=_broadcast_risk_action,
+    )
+    await reactive_monitor.start()
+
     # Start background scheduler
     scheduler.add_job(run_trading_cycle, 'interval', seconds=60, id='trading_cycle')
     scheduler.add_job(run_risk_monitor, 'interval', seconds=5, id='risk_monitor')
@@ -974,8 +1030,8 @@ async def startup_event():
     scheduler.start()
     
     logger.info(
-        "Application started — Trading: 60s | Risk: 5s | "
-        "WS broadcast: 3s | Kline sync: 60s"
+        "Application started — Trading: 60s | Risk: 5s (fallback) | "
+        "Reactive risk: 1s (event-driven) | WS broadcast: 3s | Kline sync: 60s"
     )
 
 
@@ -983,6 +1039,8 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("Shutting down...")
+    if reactive_monitor:
+        reactive_monitor.stop()
     await ws_manager.stop()
     scheduler.shutdown()
 
