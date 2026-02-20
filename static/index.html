@@ -433,22 +433,41 @@
 
         /* LLM Reasoning */
         .llm-reasoning {
+            display: block;
             margin-top: 8px;
             padding: 10px 12px;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: #1a1a2e;
             border-left: 3px solid #00d2ff;
             border-radius: 4px;
-            font-size: 0.88em;
-            line-height: 1.5;
+            font-size: 0.85em;
+            line-height: 1.6;
             color: #d0d0d0;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
         .llm-reasoning .llm-label {
+            display: block;
             font-size: 0.75em;
             font-weight: 600;
             color: #00d2ff;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-bottom: 4px;
+            margin-bottom: 6px;
+        }
+        .llm-reasoning .llm-body {
+            display: block;
+            color: #d0d0d0;
+        }
+        .llm-reasoning .llm-sep {
+            display: block;
+            height: 1px;
+            background: rgba(255,255,255,0.1);
+            margin: 6px 0;
+        }
+        .llm-reasoning .llm-sec-label {
+            color: #00d2ff;
+            font-weight: 600;
+            font-size: 0.9em;
         }
         .llm-adj {
             display: inline-block;
@@ -555,11 +574,25 @@
         }
         .dm-llm-block {
             padding: 12px 14px;
-            background: linear-gradient(135deg, #0d1b2a 0%, #1b2838 100%);
+            background: #0d1b2a;
             border-left: 3px solid #00d2ff;
             border-radius: 6px;
             font-size: 0.9em;
-            line-height: 1.6;
+            line-height: 1.7;
+            color: #d0d0d0;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        .dm-llm-block .llm-sep {
+            display: block;
+            height: 1px;
+            background: rgba(255,255,255,0.1);
+            margin: 8px 0;
+        }
+        .dm-llm-block .llm-sec-label {
+            color: #00d2ff;
+            font-weight: 600;
+            font-size: 0.9em;
         }
 
         /* Trade History Modal */
@@ -1933,6 +1966,43 @@
             }
         }
         
+        // Format LLM reasoning into structured HTML within one block
+        function formatLlmReasoning(text) {
+            if (!text) return '';
+            let main = text;
+            let extras = [];
+
+            // Extract ⚠ risk notes
+            const riskMatch = main.match(/⚠\s*(.*?)(?=\s*\||$)/);
+            if (riskMatch) {
+                extras.push(`<span class="llm-sec-label">⚠️ Risk:</span> ${riskMatch[1].trim()}`);
+                main = main.replace(/⚠\s*.*?(?=\s*\||$)/, '');
+            }
+
+            // Extract | News: ...
+            const newsMatch = main.match(/\|\s*News:\s*(.*?)(?=\s*\||$)/);
+            if (newsMatch) {
+                extras.push(`<span class="llm-sec-label">📰 News:</span> ${newsMatch[1].trim()}`);
+                main = main.replace(/\|\s*News:\s*.*?(?=\s*\||$)/, '');
+            }
+
+            // Extract | Market: ...
+            const marketMatch = main.match(/\|\s*Market:\s*(.*?)(?=\s*\||$)/);
+            if (marketMatch) {
+                extras.push(`<span class="llm-sec-label">📊 Market:</span> ${marketMatch[1].trim()}`);
+                main = main.replace(/\|\s*Market:\s*.*?(?=\s*\||$)/, '');
+            }
+
+            // Clean up leftover pipes
+            main = main.replace(/^\s*\|\s*/, '').replace(/\s*\|\s*$/, '').trim();
+
+            let html = `<span class="llm-body">${main}</span>`;
+            if (extras.length > 0) {
+                html += `<span class="llm-sep"></span>` + extras.join(`<span class="llm-sep"></span>`);
+            }
+            return html;
+        }
+
         // Load AI decisions
         async function loadDecisions(agentId) {
             try {
@@ -1959,7 +2029,7 @@
                         llmBlock = `
                             <div class="llm-reasoning">
                                 <div class="llm-label">🧠 AI Analysis <span class="llm-adj ${adjClass}">${adjLabel} conf.</span></div>
-                                ${decision.llm_reasoning}
+                                ${formatLlmReasoning(decision.llm_reasoning)}
                             </div>
                         `;
                     }
@@ -2283,7 +2353,7 @@
                     llmHtml = `
                         <div class="dm-section">
                             <div class="dm-section-title">🧠 Gemini AI Analysis <span class="llm-adj ${adjClass}">${adjLabel} conf.</span></div>
-                            <div class="dm-llm-block">${d.llm_reasoning}</div>
+                            <div class="dm-llm-block">${formatLlmReasoning(d.llm_reasoning)}</div>
                         </div>`;
                 }
 
