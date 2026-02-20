@@ -43,7 +43,7 @@ class LLMService:
 
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "")
-        self._model = None
+        self._client = None
         self._available = False
         self._last_call_time = 0.0
         self._consecutive_failures = 0
@@ -51,13 +51,12 @@ class LLMService:
 
         if self.api_key:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
-                self._model = genai.GenerativeModel(GEMINI_MODEL)
+                from google import genai
+                self._client = genai.Client(api_key=self.api_key)
                 self._available = True
                 logger.info(f"✅ LLM Service initialized (model: {GEMINI_MODEL})")
             except ImportError:
-                logger.warning("⚠ google-generativeai not installed — LLM disabled")
+                logger.warning("⚠ google-genai not installed — LLM disabled")
             except Exception as e:
                 logger.warning(f"⚠ Failed to initialize Gemini: {e}")
         else:
@@ -66,7 +65,7 @@ class LLMService:
     @property
     def is_available(self) -> bool:
         """Check if LLM is usable right now."""
-        if not self._available or not self._model:
+        if not self._available or not self._client:
             return False
         if time.time() < self._disabled_until:
             return False
@@ -114,13 +113,15 @@ class LLMService:
 
             self._last_call_time = time.time()
 
-            response = self._model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.3,
-                    "max_output_tokens": 600,
-                    "response_mime_type": "application/json",
-                }
+            from google.genai import types
+            response = self._client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=600,
+                    response_mime_type="application/json",
+                )
             )
 
             result = self._parse_response(response.text)

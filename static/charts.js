@@ -23,6 +23,7 @@ const Charts = (() => {
 
     let currentCoin = 'bitcoin';
     let currentDays = 14;
+    let currentInterval = null;  // null = days mode, string = interval mode (1m, 3m, 5m, 15m)
 
     let lastOhlcData = [];   // Keep reference to last loaded OHLC data
 
@@ -92,6 +93,26 @@ const Charts = (() => {
             lower.push({ time: data[i].time, value: mean - 2 * std });
         }
         return { upper, lower };
+    }
+
+    function getPriceFormat(price) {
+        let precision, minMove;
+        if (price >= 1000)       { precision = 2; minMove = 0.01; }
+        else if (price >= 100)   { precision = 2; minMove = 0.01; }
+        else if (price >= 10)    { precision = 3; minMove = 0.001; }
+        else if (price >= 1)     { precision = 4; minMove = 0.0001; }
+        else if (price >= 0.01)  { precision = 5; minMove = 0.00001; }
+        else                     { precision = 6; minMove = 0.000001; }
+        return { type: 'price', precision, minMove };
+    }
+
+    function applyPriceFormat(price) {
+        const fmt = getPriceFormat(price);
+        candlestickSeries.applyOptions({ priceFormat: fmt });
+        sma7Series.applyOptions({ priceFormat: fmt });
+        sma21Series.applyOptions({ priceFormat: fmt });
+        bbUpperSeries.applyOptions({ priceFormat: fmt });
+        bbLowerSeries.applyOptions({ priceFormat: fmt });
     }
 
     function chartLayoutOptions(height) {
@@ -241,6 +262,7 @@ const Charts = (() => {
     async function loadOHLC(coin, days) {
         currentCoin = coin;
         currentDays = days;
+        currentInterval = null;  // reset interval mode
 
         try {
             const resp = await fetch(`/api/market/${coin}/ohlc?days=${days}`);
@@ -259,6 +281,10 @@ const Charts = (() => {
                 seen.add(d.time);
                 return true;
             }).sort((a, b) => a.time - b.time);
+
+            // Apply dynamic precision based on price level
+            const lastPrice = cleanData[cleanData.length - 1].close;
+            applyPriceFormat(lastPrice);
 
             candlestickSeries.setData(cleanData);
             lastOhlcData = cleanData;   // Keep reference for live updates
@@ -281,14 +307,71 @@ const Charts = (() => {
             }
 
             candlestickChart.timeScale().fitContent();
+            candlestickChart.priceScale('right').applyOptions({ autoScale: true });
             rsiChart.timeScale().fitContent();
 
             // Sync crosshair between charts
             syncCharts(candlestickChart, rsiChart);
 
-            updateActiveStates(coin, days);
+            updateActiveStates(coin, days, null);
         } catch (err) {
             console.error('Error loading OHLC:', err);
+            showChartMessage('candlestickChartContainer', 'Failed to load chart data');
+        }
+    }
+
+    async function loadOHLCInterval(coin, interval, limit = 100) {
+        currentCoin = coin;
+        currentInterval = interval;
+        currentDays = null;  // reset days mode
+
+        try {
+            const resp = await fetch(`/api/market/${coin}/ohlc-interval?interval=${interval}&limit=${limit}`);
+            if (!resp.ok) throw new Error('No OHLC data');
+            const data = await resp.json();
+
+            if (!data || data.length === 0) {
+                showChartMessage('candlestickChartContainer', 'No OHLC data available');
+                return;
+            }
+
+            const seen = new Set();
+            const cleanData = data.filter(d => {
+                if (seen.has(d.time)) return false;
+                seen.add(d.time);
+                return true;
+            }).sort((a, b) => a.time - b.time);
+
+            // Apply dynamic precision based on price level
+            const lastPrice = cleanData[cleanData.length - 1].close;
+            applyPriceFormat(lastPrice);
+
+            candlestickSeries.setData(cleanData);
+            lastOhlcData = cleanData;
+            sma7Series.setData(computeSMA(cleanData, 7));
+            sma21Series.setData(computeSMA(cleanData, 21));
+
+            const bb = computeBB(cleanData, Math.min(20, cleanData.length));
+            bbUpperSeries.setData(bb.upper);
+            bbLowerSeries.setData(bb.lower);
+
+            const rsiData = computeRSI(cleanData);
+            rsiSeries.setData(rsiData);
+
+            if (rsiData.length > 0) {
+                const rsiTimes = rsiData.map(d => d.time);
+                rsiUpperLine.setData(rsiTimes.map(t => ({ time: t, value: 70 })));
+                rsiLowerLine.setData(rsiTimes.map(t => ({ time: t, value: 30 })));
+            }
+
+            candlestickChart.timeScale().fitContent();
+            candlestickChart.priceScale('right').applyOptions({ autoScale: true });
+            rsiChart.timeScale().fitContent();
+            syncCharts(candlestickChart, rsiChart);
+
+            updateActiveStates(coin, null, interval);
+        } catch (err) {
+            console.error('Error loading OHLC interval:', err);
             showChartMessage('candlestickChartContainer', 'Failed to load chart data');
         }
     }
@@ -337,12 +420,33 @@ const Charts = (() => {
         if (el) el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-style:italic;">${msg}</div>`;
     }
 
-    function updateActiveStates(coin, days) {
-        document.querySelectorAll('.coin-selector-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.coin === coin);
-        });
+    // CoinGecko ID → display symbol for chart title
+    const COIN_SYMBOLS = {
+        'bitcoin': 'BTC', 'ethereum': 'ETH', 'binancecoin': 'BNB',
+        'cardano': 'ADA', 'solana': 'SOL', 'ripple': 'XRP',
+        'polkadot': 'DOT', 'dogecoin': 'DOGE', 'avalanche-2': 'AVAX',
+        'chainlink': 'LINK', 'near': 'NEAR', 'sui': 'SUI',
+        'pepe': 'PEPE', 'aptos': 'APT', 'arbitrum': 'ARB',
+        'filecoin': 'FIL', 'render-token': 'RENDER',
+        'injective-protocol': 'INJ', 'fetch-ai': 'FET',
+        'bonk': 'BONK', 'floki': 'FLOKI',
+        'sei-network': 'SEI', 'wif': 'WIF',
+    };
+
+    function updateActiveStates(coin, days, interval) {
+        // Update pair title
+        const titleEl = document.getElementById('chartPairTitle');
+        if (titleEl) {
+            const symbol = COIN_SYMBOLS[coin] || coin.toUpperCase();
+            const tf = interval || (days ? days + 'D' : '');
+            titleEl.textContent = symbol + 'USDT' + (tf ? ' · ' + tf : '');
+        }
         document.querySelectorAll('.tf-btn').forEach(btn => {
-            btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
+            if (interval) {
+                btn.classList.toggle('active', btn.dataset.interval === interval);
+            } else {
+                btn.classList.toggle('active', btn.dataset.days && parseInt(btn.dataset.days) === days);
+            }
         });
     }
 
@@ -355,9 +459,11 @@ const Charts = (() => {
             initEquityChart(equityContainer);
         },
         loadOHLC,
+        loadOHLCInterval,
         loadEquity,
         getCurrentCoin() { return currentCoin; },
         getCurrentDays() { return currentDays; },
+        getCurrentInterval() { return currentInterval; },
         /**
          * Update the last candle's close (and high/low) with a fresh price.
          * Called every 15s from the price-refresh cycle so the chart stays

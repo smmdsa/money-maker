@@ -1,6 +1,7 @@
 """
 Main FastAPI application
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -34,9 +35,6 @@ from pydantic import BaseModel
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Initialize FastAPI app
-app = FastAPI(title="Money Maker - AI Trading Bot", version="1.0.0")
 
 # Initialize services
 market_service = MarketDataService()
@@ -95,6 +93,66 @@ class AgentCreate(BaseModel):
 
 class AgentUpdate(BaseModel):
     status: Optional[str] = None
+
+
+# ── Lifespan (replaces deprecated @app.on_event) ───────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan: startup → yield → shutdown."""
+    global reactive_monitor
+
+    # ── Startup ─────────────────────────────────────────────────────
+    _acquire_instance_lock()
+    logger.info("Starting Money Maker application...")
+
+    init_db()
+    _repair_agent_balances()
+
+    await ws_manager.start()
+
+    async def _broadcast_risk_action(action: dict):
+        """Broadcast reactive risk actions to frontend clients."""
+        await manager.broadcast({
+            "type": "risk_alert",
+            "decision": action,
+            "source": "reactive",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+    reactive_monitor = ReactiveRiskMonitor(
+        trading_service=trading_service,
+        ws_manager=ws_manager,
+        get_db=get_db,
+        trading_lock=_trading_lock,
+        broadcast_fn=_broadcast_risk_action,
+    )
+    await reactive_monitor.start()
+
+    scheduler.add_job(run_trading_cycle, 'interval', seconds=60, id='trading_cycle')
+    scheduler.add_job(run_risk_monitor, 'interval', seconds=5, id='risk_monitor')
+    scheduler.add_job(broadcast_ws_prices, 'interval', seconds=3, id='ws_price_broadcast')
+    scheduler.add_job(sync_kline_subscriptions, 'interval', seconds=60, id='kline_sync',
+                      next_run_time=datetime.utcnow() + timedelta(seconds=10))
+    scheduler.start()
+
+    logger.info(
+        "Application started — Trading: 60s | Risk: 5s (fallback) | "
+        "Reactive risk: 1s (event-driven) | WS broadcast: 3s | Kline sync: 60s"
+    )
+
+    yield
+
+    # ── Shutdown ────────────────────────────────────────────────────
+    logger.info("Shutting down...")
+    if reactive_monitor:
+        reactive_monitor.stop()
+    await ws_manager.stop()
+    scheduler.shutdown()
+
+
+# Initialize FastAPI app with lifespan
+app = FastAPI(title="Money Maker - AI Trading Bot", version="1.0.0", lifespan=lifespan)
 
 
 # API Endpoints
@@ -564,6 +622,20 @@ def get_coin_ohlc(coin: str, days: int = 14):
              "high": d["high"], "low": d["low"], "close": d["close"]} for d in data]
 
 
+@app.get("/api/market/{coin}/ohlc-interval")
+def get_coin_ohlc_interval(coin: str, interval: str = "5m", limit: int = 100):
+    """Get OHLC candlestick data by specific interval (1m, 3m, 5m, 15m, 1h, 4h, 1d)."""
+    allowed = {"1m", "3m", "5m", "15m", "1h", "4h", "1d"}
+    if interval not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid interval. Allowed: {', '.join(sorted(allowed))}")
+    limit = max(10, min(limit, 500))
+    data = market_service.get_ohlc_interval(coin, interval=interval, limit=limit)
+    if not data:
+        raise HTTPException(status_code=404, detail="No OHLC data available")
+    return [{"time": int(d["timestamp"].timestamp()), "open": d["open"],
+             "high": d["high"], "low": d["low"], "close": d["close"]} for d in data]
+
+
 @app.get("/api/market/{coin}/history")
 def get_coin_history(coin: str, days: int = 30):
     """Get historical price data for line charts"""
@@ -980,69 +1052,6 @@ async def run_backtest(req: BacktestRequest):
     except Exception as e:
         logger.error(f"Backtest failed: {e}")
         raise HTTPException(status_code=500, detail=f"Backtest error: {str(e)}")
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and start scheduler"""
-    # Ensure only one server instance
-    _acquire_instance_lock()
-    logger.info("Starting Money Maker application...")
-    
-    # Initialize database
-    init_db()
-
-    # Repair any agent balances corrupted by past race conditions
-    _repair_agent_balances()
-
-    # Start Binance WebSocket for real-time market data
-    await ws_manager.start()
-
-    # Start event-driven reactive risk monitor
-    # Reacts to each WS price tick (1s) instead of polling every 5s.
-    # The 5s scheduler remains as a defense-in-depth safety net.
-    global reactive_monitor
-
-    async def _broadcast_risk_action(action: dict):
-        """Broadcast reactive risk actions to frontend clients."""
-        await manager.broadcast({
-            "type": "risk_alert",
-            "decision": action,
-            "source": "reactive",
-            "timestamp": datetime.utcnow().isoformat()
-        })
-
-    reactive_monitor = ReactiveRiskMonitor(
-        trading_service=trading_service,
-        ws_manager=ws_manager,
-        get_db=get_db,
-        trading_lock=_trading_lock,
-        broadcast_fn=_broadcast_risk_action,
-    )
-    await reactive_monitor.start()
-
-    # Start background scheduler
-    scheduler.add_job(run_trading_cycle, 'interval', seconds=60, id='trading_cycle')
-    scheduler.add_job(run_risk_monitor, 'interval', seconds=5, id='risk_monitor')
-    scheduler.add_job(broadcast_ws_prices, 'interval', seconds=3, id='ws_price_broadcast')
-    scheduler.add_job(sync_kline_subscriptions, 'interval', seconds=60, id='kline_sync',
-                      next_run_time=datetime.utcnow() + timedelta(seconds=10))
-    scheduler.start()
-    
-    logger.info(
-        "Application started — Trading: 60s | Risk: 5s (fallback) | "
-        "Reactive risk: 1s (event-driven) | WS broadcast: 3s | Kline sync: 60s"
-    )
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    logger.info("Shutting down...")
-    if reactive_monitor:
-        reactive_monitor.stop()
-    await ws_manager.stop()
-    scheduler.shutdown()
 
 
 # Mount static files

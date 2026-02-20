@@ -297,6 +297,14 @@
             background: #f8f9fa;
             border-radius: 5px;
             text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+        .price-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+            transform: translateY(-1px);
         }
         
         .coin-name {
@@ -788,38 +796,48 @@
             margin-bottom: 15px;
         }
 
-        .coin-selector {
-            display: flex;
-            gap: 5px;
-            flex-wrap: wrap;
+        .chart-pair-title {
+            font-size: 1.15em;
+            font-weight: 700;
+            color: #333;
+            letter-spacing: 0.5px;
+            padding: 4px 0;
         }
-
-        .coin-selector-btn {
-            padding: 5px 12px;
+        .btn-chart-refresh {
+            background: none;
             border: 1px solid #ddd;
             border-radius: 4px;
-            background: #f8f9fa;
             cursor: pointer;
-            font-size: 0.85em;
-            font-weight: 500;
+            font-size: 1em;
+            padding: 3px 8px;
+            color: #666;
             transition: all 0.2s;
-            color: #555;
+            line-height: 1;
         }
-
-        .coin-selector-btn:hover {
-            border-color: #667eea;
-            color: #667eea;
+        .btn-chart-refresh:hover {
+            background: #e3f2fd;
+            border-color: #2196F3;
+            color: #2196F3;
         }
-
-        .coin-selector-btn.active {
-            background: #667eea;
-            color: white;
-            border-color: #667eea;
+        .btn-chart-refresh.spinning {
+            animation: spin 0.6s linear;
+            pointer-events: none;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
         }
 
         .timeframe-selector {
             display: flex;
             gap: 4px;
+            align-items: center;
+        }
+        .tf-separator {
+            width: 1px;
+            height: 20px;
+            background: #ccc;
+            margin: 0 4px;
         }
 
         .tf-btn {
@@ -932,6 +950,43 @@
             transition: background 0.2s;
         }
         .positions-header .btn-close-all:hover { background: #b71c1c; }
+        .positions-sort-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+            margin-right: 12px;
+        }
+        .positions-sort-group .sort-label {
+            font-size: 0.78em;
+            color: #888;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .btn-sort {
+            background: #f0f0f0;
+            color: #555;
+            border: 1px solid #ddd;
+            padding: 4px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.78em;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-sort:hover {
+            background: #e0e0e0;
+            border-color: #bbb;
+        }
+        .btn-sort.active {
+            background: #667eea;
+            color: #fff;
+            border-color: #667eea;
+        }
+        .btn-sort.active:hover {
+            background: #5568d3;
+        }
         .pos-card {
             background: #f8f9fa;
             border: 1px solid #e0e0e0;
@@ -951,6 +1006,22 @@
             font-size: 1.1em;
             font-weight: 700;
             color: #333;
+        }
+        .btn-chart-pos {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-left: 6px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            vertical-align: middle;
+            transition: background 0.2s;
+            opacity: 0.6;
+        }
+        .btn-chart-pos:hover {
+            background: #e3f2fd;
+            opacity: 1;
         }
         .pos-card .pos-meta { font-size: 0.85em; color: #666; }
         .pos-card .pos-meta span { display: block; margin-top: 3px; }
@@ -1219,6 +1290,103 @@
             from { transform: translateX(120%); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
         }
+
+        /* ── API Docs Section ─────────────────────────────────── */
+        .api-docs { max-width: 1100px; margin: 0 auto; }
+        .api-docs h2 { color: #333; margin-bottom: 8px; font-size: 1.6em; }
+        .api-docs .api-intro { color: #666; margin-bottom: 24px; font-size: 0.95em; line-height: 1.5; }
+        .api-docs .api-group { margin-bottom: 28px; }
+        .api-docs .api-group-title {
+            font-size: 1.15em; font-weight: 700; color: #1a1a2e;
+            border-bottom: 2px solid #667eea; padding-bottom: 6px; margin-bottom: 14px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .api-endpoint {
+            background: #fff; border: 1px solid #e0e4ea; border-radius: 8px;
+            margin-bottom: 10px; overflow: hidden; transition: box-shadow 0.2s;
+        }
+        .api-endpoint:hover { box-shadow: 0 2px 12px rgba(102,126,234,0.12); }
+        .api-endpoint-header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 16px; cursor: pointer; user-select: none;
+        }
+        .api-endpoint-header:hover { background: #f8f9ff; }
+        .api-method {
+            display: inline-block; min-width: 62px; text-align: center;
+            padding: 3px 10px; border-radius: 4px; font-size: 0.78em;
+            font-weight: 700; letter-spacing: 0.5px; color: #fff;
+        }
+        .api-method.get { background: #4caf50; }
+        .api-method.post { background: #2196f3; }
+        .api-method.patch { background: #ff9800; }
+        .api-method.delete { background: #f44336; }
+        .api-method.ws { background: #9c27b0; }
+        .api-path { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.92em; color: #1a1a2e; font-weight: 600; }
+        .api-desc { color: #888; font-size: 0.85em; margin-left: auto; }
+        .api-chevron { color: #aab; font-size: 0.8em; transition: transform 0.2s; }
+        .api-endpoint.open .api-chevron { transform: rotate(90deg); }
+        .api-endpoint-body {
+            display: none; padding: 0 16px 16px; border-top: 1px solid #eee;
+        }
+        .api-endpoint.open .api-endpoint-body { display: block; }
+        .api-detail-label { font-size: 0.8em; font-weight: 700; color: #667eea; text-transform: uppercase; margin: 12px 0 6px; letter-spacing: 0.5px; }
+        .api-params-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+        .api-params-table th { text-align: left; padding: 6px 10px; background: #f4f5fb; color: #555; font-weight: 600; }
+        .api-params-table td { padding: 6px 10px; border-top: 1px solid #eee; }
+        .api-params-table .param-name { font-family: monospace; color: #1a1a2e; font-weight: 600; }
+        .api-params-table .param-type { color: #667eea; font-size: 0.9em; }
+        .api-params-table .param-req { color: #f44336; font-size: 0.8em; font-weight: 700; }
+        .api-params-table .param-opt { color: #999; font-size: 0.8em; }
+        .api-response-example {
+            background: #1a1a2e; color: #a8d8a8; border-radius: 6px;
+            padding: 14px 16px; font-family: monospace; font-size: 0.82em;
+            line-height: 1.5; overflow-x: auto; white-space: pre;
+        }
+        .api-search-box {
+            display: flex; gap: 10px; margin-bottom: 20px;
+        }
+        .api-search-box input {
+            flex: 1; padding: 10px 16px; border: 1px solid #ddd; border-radius: 6px;
+            font-size: 0.95em; outline: none;
+        }
+        .api-search-box input:focus { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.15); }
+        .api-filter-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+        .api-filter-btn {
+            padding: 5px 14px; border-radius: 20px; border: 1px solid #ddd;
+            background: #fff; cursor: pointer; font-size: 0.82em; font-weight: 600;
+            transition: all 0.15s;
+        }
+        .api-filter-btn:hover { border-color: #667eea; color: #667eea; }
+        .api-filter-btn.active { background: #667eea; color: #fff; border-color: #667eea; }
+
+        /* ── Footer ───────────────────────────────────────────── */
+        .app-footer {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #8899aa; padding: 32px 30px 20px;
+            margin-top: 40px;
+        }
+        .footer-inner {
+            max-width: 1400px; margin: 0 auto;
+            display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 30px;
+        }
+        .footer-brand { font-size: 1.2em; font-weight: 700; color: #fff; margin-bottom: 8px; }
+        .footer-desc { font-size: 0.85em; line-height: 1.6; }
+        .footer-links-title { font-weight: 700; color: #ccc; margin-bottom: 10px; font-size: 0.9em; }
+        .footer-links a {
+            display: block; color: #8899aa; text-decoration: none;
+            font-size: 0.85em; padding: 3px 0; transition: color 0.15s;
+        }
+        .footer-links a:hover { color: #667eea; }
+        .footer-bottom {
+            max-width: 1400px; margin: 20px auto 0;
+            padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08);
+            font-size: 0.8em; text-align: center;
+        }
+        @media (max-width: 768px) {
+            .footer-inner { grid-template-columns: 1fr; gap: 20px; }
+            .api-endpoint-header { flex-wrap: wrap; }
+            .api-desc { margin-left: 0; width: 100%; margin-top: 4px; }
+        }
     </style>
 </head>
 <body>
@@ -1231,6 +1399,9 @@
             </a>
             <a class="nav-link" onclick="switchSection('backtest')" data-section="backtest">
                 🔙 Backtesting
+            </a>
+            <a class="nav-link" onclick="switchSection('apidocs')" data-section="apidocs">
+                📖 API Docs
             </a>
         </div>
     </nav>
@@ -1292,17 +1463,16 @@
         <div class="charts-section">
             <div class="chart-card">
                 <div class="chart-controls">
-                    <div class="coin-selector" id="coinSelector">
-                        <button class="coin-selector-btn active" data-coin="bitcoin" onclick="Charts.loadOHLC('bitcoin', Charts.getCurrentDays())">BTC</button>
-                        <button class="coin-selector-btn" data-coin="ethereum" onclick="Charts.loadOHLC('ethereum', Charts.getCurrentDays())">ETH</button>
-                        <button class="coin-selector-btn" data-coin="binancecoin" onclick="Charts.loadOHLC('binancecoin', Charts.getCurrentDays())">BNB</button>
-                        <button class="coin-selector-btn" data-coin="solana" onclick="Charts.loadOHLC('solana', Charts.getCurrentDays())">SOL</button>
-                        <button class="coin-selector-btn" data-coin="ripple" onclick="Charts.loadOHLC('ripple', Charts.getCurrentDays())">XRP</button>
-                        <button class="coin-selector-btn" data-coin="cardano" onclick="Charts.loadOHLC('cardano', Charts.getCurrentDays())">ADA</button>
-                        <button class="coin-selector-btn" data-coin="polkadot" onclick="Charts.loadOHLC('polkadot', Charts.getCurrentDays())">DOT</button>
-                        <button class="coin-selector-btn" data-coin="dogecoin" onclick="Charts.loadOHLC('dogecoin', Charts.getCurrentDays())">DOGE</button>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div class="chart-pair-title" id="chartPairTitle">BTCUSDT</div>
+                        <button class="btn-chart-refresh" id="btnChartRefresh" onclick="refreshChart()" title="Refresh chart">🔄</button>
                     </div>
                     <div class="timeframe-selector">
+                        <button class="tf-btn" data-interval="1m" onclick="Charts.loadOHLCInterval(Charts.getCurrentCoin(), '1m', 100)">1m</button>
+                        <button class="tf-btn" data-interval="3m" onclick="Charts.loadOHLCInterval(Charts.getCurrentCoin(), '3m', 100)">3m</button>
+                        <button class="tf-btn" data-interval="5m" onclick="Charts.loadOHLCInterval(Charts.getCurrentCoin(), '5m', 100)">5m</button>
+                        <button class="tf-btn" data-interval="15m" onclick="Charts.loadOHLCInterval(Charts.getCurrentCoin(), '15m', 100)">15m</button>
+                        <div class="tf-separator"></div>
                         <button class="tf-btn" data-days="1" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 1)">1D</button>
                         <button class="tf-btn" data-days="7" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 7)">7D</button>
                         <button class="tf-btn active" data-days="14" onclick="Charts.loadOHLC(Charts.getCurrentCoin(), 14)">14D</button>
@@ -1322,6 +1492,11 @@
             <div class="chart-card">
                 <div class="positions-header">
                     <h2>📊 Open Positions</h2>
+                    <div class="positions-sort-group" id="positionsSortGroup" style="display:none;">
+                        <span class="sort-label">PnL:</span>
+                        <button class="btn-sort" id="btnSortPnlDesc" onclick="sortPositions('desc')" title="Highest PnL first">▼ Best</button>
+                        <button class="btn-sort" id="btnSortPnlAsc" onclick="sortPositions('asc')" title="Lowest PnL first">▲ Worst</button>
+                    </div>
                     <button class="btn-close-all" id="btnCloseAll" onclick="closeAllPositions()" style="display:none;">✕ Close All</button>
                 </div>
                 <div id="positionsContainer">
@@ -1495,6 +1670,527 @@
 
     </div>
     </div><!-- /section-backtest -->
+
+    <!-- ══════════════ SECTION: API DOCS ══════════════ -->
+    <div class="app-section" id="section-apidocs">
+    <div class="container api-docs">
+
+        <h2>📖 API Documentation</h2>
+        <p class="api-intro">
+            Complete reference for the Money Maker REST API. Base URL: <code>http://localhost:8001</code>.<br>
+            All endpoints return JSON. WebSocket available at <code>ws://localhost:8001/ws</code> for real-time updates.
+        </p>
+
+        <!-- Search & Filter -->
+        <div class="api-search-box">
+            <input type="text" id="apiSearchInput" placeholder="Search endpoints (e.g. agents, market, backtest)…" oninput="filterApiDocs()">
+        </div>
+        <div class="api-filter-btns">
+            <button class="api-filter-btn active" onclick="filterApiMethod('all', this)">All</button>
+            <button class="api-filter-btn" onclick="filterApiMethod('get', this)">GET</button>
+            <button class="api-filter-btn" onclick="filterApiMethod('post', this)">POST</button>
+            <button class="api-filter-btn" onclick="filterApiMethod('patch', this)">PATCH</button>
+            <button class="api-filter-btn" onclick="filterApiMethod('delete', this)">DELETE</button>
+            <button class="api-filter-btn" onclick="filterApiMethod('ws', this)">WebSocket</button>
+        </div>
+
+        <!-- ── Agents ─────────────────────────────────────────── -->
+        <div class="api-group" data-group="agents">
+            <div class="api-group-title">🤖 Agents</div>
+
+            <div class="api-endpoint" data-method="post" data-keywords="create agent">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/api/agents</span>
+                    <span class="api-desc">Create a new trading agent</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Request Body (JSON)</div>
+                    <table class="api-params-table"><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">name</td><td class="param-type">string</td><td class="param-req">✓</td><td>Unique agent name</td></tr>
+                        <tr><td class="param-name">initial_balance</td><td class="param-type">float</td><td class="param-opt">—</td><td>Starting balance (default: 10000, min: 50)</td></tr>
+                        <tr><td class="param-name">strategy</td><td class="param-type">string</td><td class="param-opt">—</td><td>Strategy key (default: "confluence_master")</td></tr>
+                        <tr><td class="param-name">max_leverage</td><td class="param-type">int</td><td class="param-opt">—</td><td>Maximum leverage 1–125 (default: 10)</td></tr>
+                        <tr><td class="param-name">min_leverage</td><td class="param-type">int</td><td class="param-opt">—</td><td>Minimum leverage (default: 1)</td></tr>
+                        <tr><td class="param-name">risk_pct_min</td><td class="param-type">float</td><td class="param-opt">—</td><td>Min risk per trade %</td></tr>
+                        <tr><td class="param-name">risk_pct_max</td><td class="param-type">float</td><td class="param-opt">—</td><td>Max risk per trade %</td></tr>
+                        <tr><td class="param-name">trailing_enabled</td><td class="param-type">bool</td><td class="param-opt">—</td><td>Enable trailing stops (default: true)</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">{
+  "id": 1,
+  "name": "Alpha Bot",
+  "initial_balance": 10000.0,
+  "current_balance": 10000.0,
+  "status": "active",
+  "strategy": "confluence_master",
+  "max_leverage": 10,
+  "created_at": "2026-02-20T12:00:00"
+}</div>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="list agents">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/agents</span>
+                    <span class="api-desc">List all trading agents with portfolio summary</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response Fields (per agent)</div>
+                    <table class="api-params-table"><thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">id</td><td class="param-type">int</td><td>Agent ID</td></tr>
+                        <tr><td class="param-name">name</td><td class="param-type">string</td><td>Agent name</td></tr>
+                        <tr><td class="param-name">total_value</td><td class="param-type">float</td><td>Cash + unrealized portfolio value</td></tr>
+                        <tr><td class="param-name">profit_loss_pct</td><td class="param-type">float</td><td>Total P&L percentage</td></tr>
+                        <tr><td class="param-name">positions</td><td class="param-type">array</td><td>Open positions (symbol, amount, avg_buy_price, leverage…)</td></tr>
+                        <tr><td class="param-name">status</td><td class="param-type">string</td><td>active | paused | stopped</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="get agent detail">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/agents/{agent_id}</span>
+                    <span class="api-desc">Get detailed info about a specific agent</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Path Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">agent_id</td><td class="param-type">int</td><td>Agent ID</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response</div>
+                    <p style="font-size:0.88em;color:#666">Full agent object including portfolio items with current prices, unrealized P&L, margin, leverage, SL/TP levels.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="patch" data-keywords="update agent status pause resume">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method patch">PATCH</span>
+                    <span class="api-path">/api/agents/{agent_id}</span>
+                    <span class="api-desc">Update agent status (pause / resume / stop)</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Request Body</div>
+                    <table class="api-params-table"><thead><tr><th>Field</th><th>Type</th><th>Values</th></tr></thead><tbody>
+                        <tr><td class="param-name">status</td><td class="param-type">string</td><td>"active" | "paused" | "stopped"</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="delete" data-keywords="delete agent remove">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method delete">DELETE</span>
+                    <span class="api-path">/api/agents/{agent_id}</span>
+                    <span class="api-desc">Delete a trading agent and all related data</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Path Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">agent_id</td><td class="param-type">int</td><td>Agent ID to delete</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Positions ──────────────────────────────────────── -->
+        <div class="api-group" data-group="positions">
+            <div class="api-group-title">📊 Positions</div>
+
+            <div class="api-endpoint" data-method="post" data-keywords="close position">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/api/agents/{agent_id}/positions/{position_id}/close</span>
+                    <span class="api-desc">Manually close a single position</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Path Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">agent_id</td><td class="param-type">int</td><td>Agent ID</td></tr>
+                        <tr><td class="param-name">position_id</td><td class="param-type">int</td><td>Portfolio position ID</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">{ "status": "closed", "coin": "BTC", "pnl": 42.50 }</div>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="post" data-keywords="close all positions">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/api/agents/{agent_id}/positions/close-all</span>
+                    <span class="api-desc">Close all open positions for an agent</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">{ "status": "closed", "count": 3, "results": [...] }</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Trades & Decisions ─────────────────────────────── -->
+        <div class="api-group" data-group="trades">
+            <div class="api-group-title">📜 Trades & Decisions</div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="trades history filter symbol">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/agents/{agent_id}/trades</span>
+                    <span class="api-desc">Get trading history with filters</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Query Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">limit</td><td class="param-type">int</td><td>50</td><td>Max trades to return</td></tr>
+                        <tr><td class="param-name">offset</td><td class="param-type">int</td><td>0</td><td>Pagination offset</td></tr>
+                        <tr><td class="param-name">symbol</td><td class="param-type">string</td><td>—</td><td>Filter by trading pair (e.g. BTCUSDT)</td></tr>
+                        <tr><td class="param-name">from_date</td><td class="param-type">string</td><td>—</td><td>ISO date filter start</td></tr>
+                        <tr><td class="param-name">to_date</td><td class="param-type">string</td><td>—</td><td>ISO date filter end</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response</div>
+                    <div class="api-response-example">{
+  "trades": [{ "id": 1, "symbol": "BTCUSDT", "trade_type": "open_long",
+               "price": 65000.0, "profit_loss": 0, ... }],
+  "total": 142,
+  "summary": {
+    "total_pnl": 523.40,
+    "winning_trades": 89,
+    "losing_trades": 53,
+    "total_trades": 142
+  }
+}</div>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="traded tokens symbols">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/agents/{agent_id}/traded-tokens</span>
+                    <span class="api-desc">Get list of unique tokens traded</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">["BTCUSDT", "ETHUSDT", "SOLUSDT"]</div>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="decisions ai reasoning">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/agents/{agent_id}/decisions</span>
+                    <span class="api-desc">Get AI decision history for an agent</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Query Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">limit</td><td class="param-type">int</td><td>50</td><td>Max decisions to return</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response Fields</div>
+                    <p style="font-size:0.88em;color:#666">Each decision includes: reasoning, llm_reasoning, llm_sentiment_adj, confidence, indicators (JSON), strategy, news_considered.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="decision detail">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/decisions/{decision_id}</span>
+                    <span class="api-desc">Get a single decision by ID</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Path Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">decision_id</td><td class="param-type">int</td><td>Decision ID</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="equity curve chart snapshots">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/agents/{agent_id}/equity</span>
+                    <span class="api-desc">Get equity curve data (snapshots)</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">[{ "time": 1708387200, "value": 10523.40, "cash": 8200.0, "portfolio": 2323.40 }]</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Market Data ────────────────────────────────────── -->
+        <div class="api-group" data-group="market">
+            <div class="api-group-title">💹 Market Data</div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="prices all coins">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/market/prices</span>
+                    <span class="api-desc">Get current prices for all supported coins</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">{
+  "provider": "binance",
+  "data": [
+    { "id": "bitcoin", "current_price": 65432.10, "symbol": "BTC" },
+    { "id": "ethereum", "current_price": 3521.80, "symbol": "ETH" }
+  ]
+}</div>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="market hours world stock">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/market/hours</span>
+                    <span class="api-desc">Get current status of major world stock markets</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response</div>
+                    <p style="font-size:0.88em;color:#666">Returns NYSE, NASDAQ, London, Frankfurt, Tokyo, Shanghai, Hong Kong, Sydney with status (open/closed/pre-market), local time, and session progress %.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="coin data detail">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/market/{coin}</span>
+                    <span class="api-desc">Get detailed data for a specific coin</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Path Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Values</th></tr></thead><tbody>
+                        <tr><td class="param-name">coin</td><td class="param-type">string</td><td>bitcoin, ethereum, solana, cardano, binancecoin, ripple, polkadot, dogecoin</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="ohlc candlestick chart">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/market/{coin}/ohlc</span>
+                    <span class="api-desc">Get OHLC candlestick data</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Query Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">days</td><td class="param-type">int</td><td>14</td><td>Number of days of data</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">[{ "time": 1708300800, "open": 65000, "high": 65500, "low": 64800, "close": 65200 }]</div>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="ohlc interval timeframe 1m 5m 15m 1h">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/market/{coin}/ohlc-interval</span>
+                    <span class="api-desc">Get OHLC data by specific interval</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Query Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">interval</td><td class="param-type">string</td><td>5m</td><td>Candle interval: 1m, 3m, 5m, 15m, 1h, 4h, 1d</td></tr>
+                        <tr><td class="param-name">limit</td><td class="param-type">int</td><td>100</td><td>Number of candles (10–500)</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="history price line chart">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/market/{coin}/history</span>
+                    <span class="api-desc">Get historical price data for line charts</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Query Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">days</td><td class="param-type">int</td><td>30</td><td>Number of days of history</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Strategies ─────────────────────────────────────── -->
+        <div class="api-group" data-group="strategies">
+            <div class="api-group-title">⚡ Strategies</div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="strategies list available">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/strategies</span>
+                    <span class="api-desc">Get all available trading strategies</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response</div>
+                    <p style="font-size:0.88em;color:#666">Returns a map of strategy keys → config objects with: name, description, style, default_leverage, max_leverage, max_positions, risk_per_trade_pct, min_confidence.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── News ───────────────────────────────────────────── -->
+        <div class="api-group" data-group="news">
+            <div class="api-group-title">📰 News</div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="news sentiment events">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/news</span>
+                    <span class="api-desc">Get recent news events with sentiment analysis</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Query Parameters</div>
+                    <table class="api-params-table"><thead><tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">hours</td><td class="param-type">int</td><td>24</td><td>Hours of news to fetch</td></tr>
+                        <tr><td class="param-name">coin</td><td class="param-type">string</td><td>—</td><td>Filter by coin (optional)</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response</div>
+                    <div class="api-response-example">{
+  "sentiment": { "overall": "bullish", "score": 0.65 },
+  "news": [{ "title": "...", "source": "...", "sentiment": "positive",
+             "impact_score": 8, "cryptocurrency": "bitcoin" }]
+}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Backtesting ────────────────────────────────────── -->
+        <div class="api-group" data-group="backtest">
+            <div class="api-group-title">🔬 Backtesting</div>
+
+            <div class="api-endpoint" data-method="post" data-keywords="backtest simulation run">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/api/backtest</span>
+                    <span class="api-desc">Run a backtest simulation</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Request Body (JSON)</div>
+                    <table class="api-params-table"><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">strategy</td><td class="param-type">string</td><td class="param-req">✓</td><td>Strategy key</td></tr>
+                        <tr><td class="param-name">coin</td><td class="param-type">string</td><td class="param-req">✓</td><td>Coin ID (bitcoin, ethereum, solana…)</td></tr>
+                        <tr><td class="param-name">period_days</td><td class="param-type">int</td><td class="param-opt">—</td><td>1, 3, 7, 14, 30, 90, 180, 365 (default: 90)</td></tr>
+                        <tr><td class="param-name">leverage</td><td class="param-type">int</td><td class="param-opt">—</td><td>0 = strategy default</td></tr>
+                        <tr><td class="param-name">initial_balance</td><td class="param-type">float</td><td class="param-opt">—</td><td>Starting capital (default: 10000, min: 50)</td></tr>
+                        <tr><td class="param-name">trailing_enabled</td><td class="param-type">bool</td><td class="param-opt">—</td><td>Enable trailing stops (default: true)</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Response</div>
+                    <p style="font-size:0.88em;color:#666">Returns full backtest metrics: total_return, win_rate, sharpe_ratio, max_drawdown, total_trades, equity_curve, and per-trade log.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── System ─────────────────────────────────────────── -->
+        <div class="api-group" data-group="system">
+            <div class="api-group-title">🔧 System</div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="health check status">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/health</span>
+                    <span class="api-desc">Check API and service health</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response</div>
+                    <div class="api-response-example">{
+  "status": "ok",
+  "market_service": { ... },
+  "llm_service": { ... },
+  "websocket": { "connected": true, "subscriptions": 8 },
+  "reactive_risk": { "watched_symbols": 3, "ticks_processed": 14523 }
+}</div>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="get" data-keywords="websocket status binance ws">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method get">GET</span>
+                    <span class="api-path">/api/ws/status</span>
+                    <span class="api-desc">Binance WebSocket connection status</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response</div>
+                    <p style="font-size:0.88em;color:#666">Returns WebSocket connection details, subscribed streams, message counts, and latency.</p>
+                </div>
+            </div>
+
+            <div class="api-endpoint" data-method="post" data-keywords="repair balances fix">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method post">POST</span>
+                    <span class="api-path">/api/repair-balances</span>
+                    <span class="api-desc">Replay all trades to fix corrupted balances</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Response Example</div>
+                    <div class="api-response-example">{
+  "total_agents": 3,
+  "repaired": 1,
+  "details": [
+    { "agent": "Alpha", "old_balance": 9850.00, "correct_balance": 9892.50,
+      "difference": 42.50, "status": "repaired" },
+    { "agent": "Beta", "balance": 10250.00, "status": "ok" }
+  ]
+}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── WebSocket ──────────────────────────────────────── -->
+        <div class="api-group" data-group="websocket">
+            <div class="api-group-title">🔌 WebSocket</div>
+
+            <div class="api-endpoint" data-method="ws" data-keywords="websocket realtime live updates">
+                <div class="api-endpoint-header" onclick="this.parentElement.classList.toggle('open')">
+                    <span class="api-method ws">WS</span>
+                    <span class="api-path">ws://localhost:8001/ws</span>
+                    <span class="api-desc">Real-time updates (prices, trades, decisions)</span>
+                    <span class="api-chevron">▶</span>
+                </div>
+                <div class="api-endpoint-body">
+                    <div class="api-detail-label">Message Types (Server → Client)</div>
+                    <table class="api-params-table"><thead><tr><th>Type</th><th>Description</th></tr></thead><tbody>
+                        <tr><td class="param-name">price_update</td><td>Real-time price ticks from Binance</td></tr>
+                        <tr><td class="param-name">trade_update</td><td>New trade executed by an agent (includes decision details)</td></tr>
+                        <tr><td class="param-name">risk_alert</td><td>Risk monitor triggered SL/TP or emergency close</td></tr>
+                    </tbody></table>
+                    <div class="api-detail-label">Connection Example</div>
+                    <div class="api-response-example">const ws = new WebSocket('ws://localhost:8001/ws');
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === 'price_update') {
+    console.log(msg.symbol, msg.price);
+  }
+};</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    </div><!-- /section-apidocs -->
 
     </div><!-- /app-body -->
     
@@ -1875,19 +2571,61 @@
             }
         }
 
+        // ── Position sort state ──────────────────────────────────────────
+        let _positionSortOrder = null; // null | 'asc' | 'desc'
+
+        function sortPositions(order) {
+            // Toggle off if clicking the same button
+            if (_positionSortOrder === order) {
+                _positionSortOrder = null;
+            } else {
+                _positionSortOrder = order;
+            }
+            // Update button active states
+            document.getElementById('btnSortPnlDesc').classList.toggle('active', _positionSortOrder === 'desc');
+            document.getElementById('btnSortPnlAsc').classList.toggle('active', _positionSortOrder === 'asc');
+            // Re-sort the DOM cards
+            _applySortToPositionCards();
+        }
+
+        function _applySortToPositionCards() {
+            const container = document.getElementById('positionsContainer');
+            if (!container) return;
+            const cards = Array.from(container.querySelectorAll('.pos-card'));
+            if (cards.length < 2 || !_positionSortOrder) return;
+
+            cards.sort((a, b) => {
+                const pnlA = _extractPnlFromCard(a);
+                const pnlB = _extractPnlFromCard(b);
+                return _positionSortOrder === 'asc' ? pnlA - pnlB : pnlB - pnlA;
+            });
+            cards.forEach(c => container.appendChild(c));
+        }
+
+        function _extractPnlFromCard(card) {
+            const el = card.querySelector('.pnl-value');
+            if (!el) return 0;
+            const txt = el.textContent.trim();  // e.g. "+$1.48" or "-$0.32"
+            const num = parseFloat(txt.replace(/[$,]/g, ''));
+            return isNaN(num) ? 0 : num;
+        }
+
         // Render open positions in the dedicated section
         function renderPositions(agent) {
             const section = document.getElementById('positionsSection');
             const container = document.getElementById('positionsContainer');
             const btnCloseAll = document.getElementById('btnCloseAll');
+            const sortGroup = document.getElementById('positionsSortGroup');
 
             if (!agent.portfolio || agent.portfolio.length === 0) {
                 container.innerHTML = '<div class="empty">No open positions</div>';
                 btnCloseAll.style.display = 'none';
+                if (sortGroup) sortGroup.style.display = 'none';
                 return;
             }
 
             btnCloseAll.style.display = 'inline-block';
+            if (sortGroup) sortGroup.style.display = agent.portfolio.length > 1 ? 'flex' : 'none';
             container.innerHTML = agent.portfolio.map(p => {
                 const isLong = p.position_type === 'long';
                 const pnlClass = p.profit_loss >= 0 ? 'profit' : 'loss';
@@ -1935,6 +2673,7 @@
                             <span class="badge-${p.position_type}">${p.position_type.toUpperCase()}</span>
                             <span class="badge-leverage">${p.leverage}x</span>
                             ${trailBadge}
+                            <button class="btn-chart-pos" onclick="navigateToChart(_symbolToCoinId['${p.symbol}'] || '${p.symbol.toLowerCase()}', event)" title="View chart">📊</button>
                         </div>
                         <div class="pos-meta">
                             <span>Margin: <strong>$${p.margin.toFixed(2)}</strong></span>
@@ -1971,6 +2710,9 @@
                     </div>
                 </div>`;
             }).join('');
+
+            // Re-apply sort order if active
+            if (_positionSortOrder) _applySortToPositionCards();
         }
 
         // Close a single position
@@ -2173,7 +2915,7 @@
                     // Store coinId as data attribute for reactive updates
                     const coinId = coin.id || coin.symbol.toLowerCase();
                     return `
-                    <div class="price-card" data-coin-id="${coinId}">
+                    <div class="price-card" data-coin-id="${coinId}" onclick="navigateToChart('${coinId}')">
                         <div class="coin-name">${coin.symbol}</div>
                         <div class="coin-price">$${coin.current_price ? fmtPrice(coin.current_price) : 'N/A'}</div>
                         ${coin.price_change_24h ? `
@@ -2406,6 +3148,45 @@
                     }
                 }
             });
+
+            // Re-apply sort after live PnL changes
+            if (_positionSortOrder) _applySortToPositionCards();
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        // Navigate to chart — called by price cards and position chart icons
+        // Loads the selected coin in the chart and scrolls to it smoothly
+        // ══════════════════════════════════════════════════════════════════
+        function navigateToChart(coinId, event) {
+            if (event) event.stopPropagation();
+            if (!coinId || typeof Charts === 'undefined') return;
+
+            // Load chart: use last active mode (interval or days)
+            const interval = Charts.getCurrentInterval();
+            if (interval) {
+                Charts.loadOHLCInterval(coinId, interval, 100);
+            } else {
+                Charts.loadOHLC(coinId, Charts.getCurrentDays() || 14);
+            }
+
+            // Scroll charts section into view
+            const chartsSection = document.querySelector('.charts-section');
+            if (chartsSection) {
+                chartsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        function refreshChart() {
+            if (typeof Charts === 'undefined') return;
+            const btn = document.getElementById('btnChartRefresh');
+            if (btn) { btn.classList.add('spinning'); setTimeout(() => btn.classList.remove('spinning'), 600); }
+            const coin = Charts.getCurrentCoin();
+            const interval = Charts.getCurrentInterval();
+            if (interval) {
+                Charts.loadOHLCInterval(coin, interval, 100);
+            } else {
+                Charts.loadOHLC(coin, Charts.getCurrentDays() || 14);
+            }
         }
 
         // Symbol → CoinGecko ID reverse map (for position price matching)
@@ -2995,7 +3776,9 @@
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
             const sec = document.getElementById('section-' + sectionId);
             if (sec) sec.classList.add('active');
-            event.currentTarget.classList.add('active');
+            // Highlight matching nav link (works from footer links too)
+            const navLink = document.querySelector(`.nav-link[data-section="${sectionId}"]`);
+            if (navLink) navLink.classList.add('active');
             window.scrollTo(0, 0);
         }
 
@@ -3445,6 +4228,63 @@
                 }
             }, AGENT_REFRESH * 1000);
         });
+
+        // ══════════════ API DOCS SEARCH & FILTER ═════════════════════════
+        function filterApiDocs() {
+            const q = (document.getElementById('apiSearchInput').value || '').toLowerCase();
+            document.querySelectorAll('.api-endpoint').forEach(ep => {
+                const path = (ep.querySelector('.api-path')?.textContent || '').toLowerCase();
+                const desc = (ep.querySelector('.api-desc')?.textContent || '').toLowerCase();
+                const kw = (ep.dataset.keywords || '').toLowerCase();
+                const method = ep.dataset.method || '';
+                const activeMethod = document.querySelector('.api-filter-btn.active')?.textContent?.trim().toLowerCase() || 'all';
+                const methodMatch = activeMethod === 'all' || method === activeMethod;
+                const textMatch = !q || path.includes(q) || desc.includes(q) || kw.includes(q) || method.includes(q);
+                ep.style.display = methodMatch && textMatch ? '' : 'none';
+            });
+            // Hide empty groups
+            document.querySelectorAll('.api-group').forEach(g => {
+                const visible = g.querySelectorAll('.api-endpoint:not([style*="display: none"])');
+                g.style.display = visible.length ? '' : 'none';
+            });
+        }
+
+        function filterApiMethod(method, btn) {
+            document.querySelectorAll('.api-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            filterApiDocs();
+        }
     </script>
+
+    <!-- ── Footer ──────────────────────────────────────────────── -->
+    <footer class="app-footer">
+        <div class="footer-inner">
+            <div>
+                <div class="footer-brand">💰 Money Maker</div>
+                <p class="footer-desc">
+                    AI-powered cryptocurrency trading platform with multi-strategy agents,
+                    real-time risk monitoring, and comprehensive backtesting.
+                </p>
+            </div>
+            <div class="footer-links">
+                <div class="footer-links-title">Quick Links</div>
+                <a href="#" onclick="switchSection('dashboard');return false;">📊 Dashboard</a>
+                <a href="#" onclick="switchSection('backtest');return false;">🔙 Backtesting</a>
+                <a href="#" onclick="switchSection('apidocs');return false;">📖 API Docs</a>
+                <a href="/docs" target="_blank">⚙️ Swagger UI</a>
+            </div>
+            <div class="footer-links">
+                <div class="footer-links-title">API Reference</div>
+                <a href="#" onclick="switchSection('apidocs');document.getElementById('apiSearchInput').value='agents';filterApiDocs();return false;">🤖 Agents API</a>
+                <a href="#" onclick="switchSection('apidocs');document.getElementById('apiSearchInput').value='market';filterApiDocs();return false;">💹 Market API</a>
+                <a href="#" onclick="switchSection('apidocs');document.getElementById('apiSearchInput').value='backtest';filterApiDocs();return false;">🔬 Backtest API</a>
+                <a href="#" onclick="switchSection('apidocs');document.getElementById('apiSearchInput').value='health';filterApiDocs();return false;">🔧 System API</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            Money Maker v1.0.0 &mdash; Built with FastAPI &amp; Python &mdash; &copy; 2026
+        </div>
+    </footer>
 </body>
 </html>
+
