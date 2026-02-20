@@ -1,6 +1,6 @@
 # Money Maker — Feature Backlog
 
-> Última actualización: 2026-02-20 (sesión 7)
+> Última actualización: 2026-02-20 (sesión 8)
 
 ---
 
@@ -686,6 +686,127 @@ BinanceWSManager (async, event loop)
 
 ---
 
+### 5e-bis. 🔄 PriceBus — Frontend Reactive Architecture — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-20  
+**Área**: Frontend / Arquitectura Reactiva
+
+**Problema**: Tras implementar WebSocket (5e), el frontend mantenía dos fuentes de verdad (WS push + REST polling 15s) y múltiples componentes actualizaban precios de forma independiente. Los timers, badges, P&L de posiciones y agent list estaban desincronizados.
+
+**Solución implementada**: **PriceBus** — un singleton pub/sub event dispatcher que centraliza todos los datos de precio del WebSocket como única fuente de verdad.
+
+**Componentes reactivos (6 listeners):**
+
+| Listener | Evento | Responsabilidad |
+|----------|:------:|----------------|
+| `_onTickUpdatePriceGrid` | tick | Actualiza price cards con `data-coin-id` (O(1) lookup) |
+| `_onTickUpdateChart` | tick | Actualiza último candle del chart vía `Charts.updateLastPrice()` |
+| `_onTickUpdateAllAgents` | tick | Recalcula P&L de TODOS los agentes en la lista (no solo el seleccionado) |
+| `_onTickUpdatePositions` | tick | Actualiza cards de posiciones del agente seleccionado (PnL, progress bar) |
+| `_onTickUpdateFreshness` | tick | Muestra barra "LIVE" verde cuando WS activo, countdown cuando REST fallback |
+| `_onWsStatusChange` | wsStatus | Actualiza badge WS y badge de data source |
+
+**Cambios clave:**
+- **REST polling condicional**: `refreshPrices()` salta REST cuando `PriceBus.wsConnected && PriceBus.freshnessSec < 10`
+- **`_cachedAgents`**: Todos los agentes cacheados desde `loadAgents()` con datos de posiciones para P&L reactivo
+- **`data-agent-id`**: Atributo DOM para O(1) targeting de agent items
+- **`data-coin-id`**: Atributo DOM para O(1) targeting de price cards
+- **`_symbolToCoinId`**: Reverse map (`BTC` → `bitcoin`) para matching de posiciones
+
+**Backend (`/api/agents` endpoint ampliado):**
+- Cada agente ahora incluye array `positions[]` con: `symbol`, `amount`, `avg_buy_price`, `position_type`, `margin`, `leverage`
+- Permite al frontend recalcular P&L reactivamente sin llamadas adicionales
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `static/index.html` | PriceBus singleton, 6 listeners, `_cachedAgents`, `_symbolToCoinId`, REST condicional, `data-agent-id`/`data-coin-id` atributos |
+| `main.py` | `/api/agents` incluye `positions[]` por agente |
+
+---
+
+### 5f. ⚡ Event-Driven Reactive Risk Monitor — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-20  
+**Área**: Trading / Risk Management / Performance Crítica
+
+**Problema**: El risk monitor polling (5s) tenía dos problemas graves:
+1. **Latencia**: SL/TP detection cada 5s — en mercados volátiles con apalancamiento, un gap de 5s puede significar pérdidas significativas
+2. **Blind spot**: Durante el trading cycle (5-30s de duración), el risk monitor se skipea completamente porque `_trading_lock.acquire(blocking=False)` falla — creando un blind spot de hasta 30s
+
+**Solución implementada**: `ReactiveRiskMonitor` — clase event-driven que se suscribe al callback de precio del WebSocket y reacciona a cada tick (1s).
+
+**Arquitectura:**
+
+```
+WS tick (1s) → _on_mark_price_batch → fire callbacks → watchlist filter O(n) → thread pool → risk check → DB commit
+```
+
+**Mejoras de latencia:**
+
+| Métrica | Antes (polling) | Después (reactivo) |
+|---------|:---------------:|:------------------:|
+| Detección SL/TP | 5s (skip durante trading cycle → hasta 30s) | **~1s** event-driven |
+| Retry tras lock skip | 5s | **1s** |
+| Duración del check | ~5ms (todas las posiciones) | **~2.5ms** (solo símbolos con cambio) |
+
+**Componentes:**
+
+1. **Callback system en `BinanceWSManager`**:
+   - `on_price_tick(callback)` / `remove_price_tick(callback)` — registro de callbacks
+   - Callbacks se disparan FUERA del lock (después de actualizar `_mark_prices`)
+   - Cada callback recibe `Dict[str, float]` con precios actualizados
+
+2. **`ReactiveRiskMonitor` class** ([backend/services/risk_monitor.py](backend/services/risk_monitor.py)):
+   - **Watchlist**: `Dict[str, List[Tuple[agent_id, pos_id, coin_id]]]` indexada por Binance symbol
+   - **O(n) filter**: Solo procesa posiciones cuyo símbolo cambió en el tick
+   - **Thread pool dispatch**: `asyncio.to_thread()` para no bloquear event loop
+   - **`threading.Event` idle flag**: Previene stacking de checks concurrentes
+   - **Non-blocking lock**: `_trading_lock.acquire(blocking=False)` — nunca bloquea trading cycle
+   - **Fresh DB session per tick**: Sin referencias stale
+   - **Single commit per tick batch**: Trailing stop updates batched
+   - **Immediate watchlist refresh**: Tras cada position open/close/agent status change
+   - **Periodic refresh**: Cada 30s como safety net
+
+3. **Health endpoint** (`/api/health` → `reactive_risk`):
+   ```json
+   {
+     "active": true,
+     "watchlist_symbols": 3,
+     "watchlist_positions": 3,
+     "watched_symbols": ["DOTUSDT", "ADAUSDT", "RENDERUSDT"],
+     "ticks_processed": 154,
+     "last_check_ms": 2.58,
+     "ticks_skipped_locked": 37,
+     "actions_taken": 0
+   }
+   ```
+
+**Defense-in-depth:**
+- El scheduler de 5s **permanece activo** como safety net (backup)
+- Si el WS se desconecta o los callbacks fallan, el poller 5s sigue funcionando
+- Ambos sistemas usan `_trading_lock non-blocking` — nunca interfieren con el trading cycle
+
+**Watchlist refresh triggers:**
+- `POST /api/agents/{id}/positions/{pos_id}/close` — cierre manual
+- `POST /api/agents/{id}/positions/close-all` — cierre masivo
+- `PATCH /api/agents/{id}` — cambio de status (paused/stopped)
+- `run_trading_cycle()` completion — puede haber abierto/cerrado posiciones
+- Periodic 30s refresh — defense-in-depth
+
+**Archivos creados / modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/risk_monitor.py` | **NUEVO** (~280 líneas) — ReactiveRiskMonitor class completo |
+| `backend/services/ws_monitor.py` | Callback system: `_price_callbacks`, `on_price_tick()`, `remove_price_tick()`, `_on_mark_price_batch()` dispara callbacks fuera del lock, `_loop` reference, health check con `price_callbacks` count |
+| `main.py` | Import + init ReactiveRiskMonitor, `_broadcast_risk_action()`, startup/shutdown lifecycle, health endpoint con `reactive_risk`, watchlist refresh en close/close-all/update-agent/trading-cycle endpoints |
+
+---
+
 ### 5b. 📊 Open Positions UI — Rediseño Full-Width — COMPLETADO
 
 **Estado**: ✅ Implementado  
@@ -1062,14 +1183,14 @@ Bot de Telegram y/o email para notificar:
 7.  Market Clocks (World Markets) ──→ ✅ COMPLETADO (2026-02-19)
 8.  Scalper Strategy Overhaul ──→ ✅ COMPLETADO (2026-02-19)
 5e. Binance WebSocket Streams ──→ ✅ COMPLETADO (2026-02-20)
+5e². PriceBus Frontend Reactive ──→ ✅ COMPLETADO (2026-02-20)
+5f. Event-Driven Reactive Risk Monitor ──→ ✅ COMPLETADO (2026-02-20)
 ─── Próximo ciclo (Top 5) ───────────────────────────────
 9.  Trailing SL + Trailing TP (B5+B6) ──→ 🔜 next
 10. Fear & Greed Index (A1) ──→ 🔜 next
 11. Notificaciones Telegram (#6) ──→ 🔜 next
 12. Export CSV de Trades (C4) ──→ 🔜 next
 13. On-chain / Whale Alerts (A2) ──→ 🔜 next
-─── Futuro ──────────────────────────────────────────────
-5f. Event-driven Risk Monitor ──→ planificado (reaccionar a cada WS tick)
 ```
 
 ---
@@ -1081,7 +1202,9 @@ Bot de Telegram y/o email para notificar:
 | Backend | FastAPI + uvicorn | Puerto 8001, 21+ endpoints + WebSocket |
 | Base de datos | SQLite + SQLAlchemy | 6 modelos (TradingAgent, Portfolio, Trade, Decision, PortfolioSnapshot, NewsEvent) |
 | Market Data (primary) | **Binance API** | REST + **WebSocket** (real-time mark prices, funding rates, klines) |
-| Market Data (WS) | **Binance Futures WebSocket** | `!markPrice@arr@1s` — 687 símbolos, ~1s latencia, auto-reconnect |
+| Market Data (WS) | **Binance Futures WebSocket** | `!markPrice@arr@1s` — 687 símbolos, ~1s latencia, auto-reconnect, price tick callbacks |
+| Risk Monitor (reactive) | **ReactiveRiskMonitor** | Event-driven SL/TP/liquidación, ~1s latencia, watchlist O(n), ~2.5ms/check |
+| Frontend reactivo | **PriceBus** | Singleton pub/sub, 6 listeners, REST condicional, data-* atributos O(1) |
 | Market Data (fallback) | CoinGecko API | 10 req/min free tier, RateLimiter con 5s max wait |
 | Noticias | RSS feeds | CoinDesk, CoinTelegraph, Bitcoin Magazine + CryptoPanic (opcional) |
 | Charts | TradingView Lightweight Charts v4 | CDN, open source, candlestick + indicadores + price sync |
@@ -1093,23 +1216,24 @@ Bot de Telegram y/o email para notificar:
 | Futuros | LONG/SHORT, leverage 1-125x, liquidation, SL/TP | Position sizing profesional |
 | Market Clocks | 8 mercados mundiales | Hora real, alertas open/close, integración con agent decisions |
 | Account Profiles | 4 presets (Micro/Small/Standard/Large) | Auto-suggest por balance, leverage/risk ranges |
-| Scheduler | APScheduler | Trading 60s + Risk 5s + WS broadcast 3s + Kline sync 60s |
+| Scheduler | APScheduler | Trading 60s + Risk 5s (fallback) + WS broadcast 3s + Kline sync 60s |
 | Async | asyncio.to_thread() + WebSocket | Trading cycle en thread, WS en event loop |
 
-### Estructura de archivos (~11,000+ líneas)
+### Estructura de archivos (~14,000+ líneas)
 
 | Archivo | Líneas | Responsabilidad |
 |---------|--------|----------------|
-| `main.py` | 800+ | Endpoints, scheduler, WebSocket, backtest API, market hours, WS broadcast |
+| `main.py` | 1090+ | Endpoints, scheduler, WebSocket, backtest API, market hours, WS broadcast, reactive risk monitor |
 | `backend/services/strategies.py` | 1410+ | Indicadores técnicos, 10 estrategias, position sizing con risk overrides |
 | `backend/services/backtester.py` | 700+ | Motor de backtesting, commission model, sliding window |
 | `backend/services/market_data.py` | 960+ | RateLimiter, BinanceProvider, MarketDataService, WS integration, 23 tokens |
 | `backend/services/trading_agent.py` | 770+ | Futures lifecycle, strategy engine, LLM integration, risk monitor, market hours context |
-| `backend/services/ws_monitor.py` | 300+ | BinanceWSManager, real-time mark prices/funding/klines, auto-reconnect |
+| `backend/services/ws_monitor.py` | 450+ | BinanceWSManager, real-time mark prices/funding/klines, auto-reconnect, price tick callbacks |
+| `backend/services/risk_monitor.py` | 360+ | ReactiveRiskMonitor, event-driven SL/TP/liquidación, watchlist management |
 | `backend/services/llm_service.py` | 270 | Gemini 2.0 Flash, LLMAnalysis, rate limiting |
 | `backend/services/news_service.py` | 313 | RSS feeds, sentimiento por keywords |
 | `backend/models/database.py` | 130+ | 6 modelos SQLAlchemy (con campos futures + LLM + decision_id + account profiles) |
-| `static/index.html` | 2700+ | Dashboard + Backtesting SPA, strategy picker, futures UI, LLM blocks, market clocks, account profiles, position cards, WS price updates |
+| `static/index.html` | 4290+ | Dashboard + Backtesting SPA, strategy picker, futures UI, LLM blocks, market clocks, account profiles, position cards, PriceBus reactive architecture, WS price updates |
 | `static/charts.js` | 390+ | Módulo de charts TradingView con price sync |
 | `backtest_cli.py` | 320+ | CLI de backtesting, comparativas, colores |
 
