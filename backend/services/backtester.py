@@ -289,6 +289,13 @@ class Backtester:
         candles_per_funding = FUNDING_INTERVAL_H / hours_per_candle if hours_per_candle > 0 else 999999
         candles_since_funding = 0.0
 
+        # Cooldown tracking (prevents rapid re-entry after SL hit)
+        cooldown_left = 0
+        # Import scalper params for cooldown (if applicable)
+        from backend.services.strategies.scalper import TIMEFRAME_PARAMS
+        scalper_params = TIMEFRAME_PARAMS.get(strategy_key) if strategy_key.startswith("scalper") else None
+        cooldown_candles = scalper_params.get("cooldown_candles", 0) if scalper_params else 0
+
         # Buy & hold reference
         first_price = klines[warmup]["close"]
         last_price = klines[-1]["close"]
@@ -328,6 +335,12 @@ class Backtester:
                     total_commissions += close_fee
                     if is_trailing_sl:
                         trailing_sl_closes += 1
+                    # Activate cooldown after SL hit (not after TP)
+                    last_trade = trades[-1] if trades else None
+                    if last_trade and ("Stop-loss" in (last_trade.reason or "")
+                                       or "Trailing SL" in (last_trade.reason or "")
+                                       or "Liquidated" in (last_trade.reason or "")):
+                        cooldown_left = cooldown_candles
                     position = None
 
             # --- Funding rate (every 8h on open position value) ---
@@ -358,8 +371,12 @@ class Backtester:
             )
 
             # --- Act on signal ---
+            # Decrement cooldown counter
+            if cooldown_left > 0:
+                cooldown_left -= 1
+
             if position is None and signal.direction in ("long", "short"):
-                if signal.confidence >= cfg.min_confidence:
+                if cooldown_left <= 0 and signal.confidence >= cfg.min_confidence:
                     result = self._open_position(
                         signal, close, leverage, strategy_key,
                         balance, ts, trades, trailing_enabled

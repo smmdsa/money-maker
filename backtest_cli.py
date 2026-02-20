@@ -245,8 +245,8 @@ Ejemplos:
                         help="Coins: bitcoin, ethereum, solana, ripple, binancecoin (o 'all')")
     parser.add_argument("-p", "--periods", nargs="+", type=int, default=[30],
                         help="Periodos en días (ej: 30 90 180)")
-    parser.add_argument("-l", "--leverage", type=int, default=10,
-                        help="Leverage (default: 10)")
+    parser.add_argument("-l", "--leverage", type=int, default=3,
+                        help="Leverage (default: 3)")
     parser.add_argument("-b", "--balance", type=float, default=100,
                         help="Balance inicial (default: 100)")
     parser.add_argument("--compare", action="store_true",

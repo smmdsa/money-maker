@@ -27,10 +27,10 @@ from backend.services.strategies.models import STRATEGIES, Signal
 
 TIMEFRAME_PARAMS: Dict[str, Dict] = {
     "scalper_1m": {
-        # Entry quality
-        "min_score": 5,
-        "conf_divisor": 14.0,
-        "min_score_margin": 2,       # long-short gap required
+        # Entry quality — very high bar for noisy timeframe
+        "min_score": 8,
+        "conf_divisor": 16.0,
+        "min_score_margin": 3,
         # EMA
         "ema_spread_threshold": 0.04,
         # RSI zones
@@ -38,7 +38,7 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         "rsi_pullback_range": (35, 47),
         "rsi_bounce_range": (53, 65),
         # Bollinger
-        "bb_entry_low": 0.15, "bb_entry_high": 0.85,
+        "bb_entry_low": 0.12, "bb_entry_high": 0.88,
         "bb_extreme_low": 0.05, "bb_extreme_high": 0.95,
         # Momentum
         "momentum_threshold": 0.15,
@@ -48,18 +48,20 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         # Trend filter
         "counter_trend_penalty": 3,
         "require_volume": True,
-        # Trailing: trail < 0 signals to backtester to disable
+        # Trailing disabled
         "disable_trailing": True,
+        # 30 × 1m = 30 minutes after SL
+        "cooldown_candles": 30,
     },
     "scalper_3m": {
-        "min_score": 5,
-        "conf_divisor": 14.0,
-        "min_score_margin": 2,
+        "min_score": 8,
+        "conf_divisor": 16.0,
+        "min_score_margin": 3,
         "ema_spread_threshold": 0.06,
         "rsi_oversold": 24, "rsi_overbought": 76,
         "rsi_pullback_range": (36, 48),
         "rsi_bounce_range": (52, 64),
-        "bb_entry_low": 0.17, "bb_entry_high": 0.83,
+        "bb_entry_low": 0.15, "bb_entry_high": 0.85,
         "bb_extreme_low": 0.05, "bb_extreme_high": 0.95,
         "momentum_threshold": 0.20,
         "sl_atr_mult": 1.3, "tp_atr_mult": 2.6,
@@ -67,45 +69,51 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         "counter_trend_penalty": 3,
         "require_volume": True,
         "disable_trailing": True,
+        # 20 × 3m = 60 minutes after SL
+        "cooldown_candles": 20,
     },
     "scalper_5m": {
-        "min_score": 4,
-        "conf_divisor": 12.0,
-        "min_score_margin": 2,
+        "min_score": 8,
+        "conf_divisor": 16.0,
+        "min_score_margin": 3,
         "ema_spread_threshold": 0.08,
         "rsi_oversold": 25, "rsi_overbought": 75,
         "rsi_pullback_range": (35, 50),
         "rsi_bounce_range": (50, 65),
-        "bb_entry_low": 0.20, "bb_entry_high": 0.80,
+        "bb_entry_low": 0.18, "bb_entry_high": 0.82,
         "bb_extreme_low": 0.05, "bb_extreme_high": 0.95,
         "momentum_threshold": 0.25,
         "sl_atr_mult": 1.2, "tp_atr_mult": 2.4,
         "sl_min_pct": 0.25, "tp_min_rr": 2.0,
         "counter_trend_penalty": 2,
-        "require_volume": False,
-        "disable_trailing": False,
+        "require_volume": True,
+        "disable_trailing": True,
+        # 30 × 5m = 150 minutes after SL
+        "cooldown_candles": 30,
     },
     "scalper_15m": {
-        "min_score": 4,
-        "conf_divisor": 12.0,
-        "min_score_margin": 2,
+        "min_score": 7,
+        "conf_divisor": 14.0,
+        "min_score_margin": 3,
         "ema_spread_threshold": 0.10,
         "rsi_oversold": 27, "rsi_overbought": 73,
         "rsi_pullback_range": (35, 50),
         "rsi_bounce_range": (50, 65),
-        "bb_entry_low": 0.22, "bb_entry_high": 0.78,
+        "bb_entry_low": 0.20, "bb_entry_high": 0.80,
         "bb_extreme_low": 0.08, "bb_extreme_high": 0.92,
         "momentum_threshold": 0.30,
-        "sl_atr_mult": 1.2, "tp_atr_mult": 3.0,
-        "sl_min_pct": 0.35, "tp_min_rr": 2.5,
+        "sl_atr_mult": 1.2, "tp_atr_mult": 2.4,
+        "sl_min_pct": 0.35, "tp_min_rr": 2.0,
         "counter_trend_penalty": 2,
-        "require_volume": False,
-        "disable_trailing": False,
+        "require_volume": True,
+        "disable_trailing": True,
+        # 15 × 15m = 225 minutes after SL
+        "cooldown_candles": 15,
     },
-    "scalper": {  # 1h
-        "min_score": 4,
+    "scalper": {  # 1h — ALREADY PROFITABLE, keep current
+        "min_score": 5,
         "conf_divisor": 12.0,
-        "min_score_margin": 2,
+        "min_score_margin": 3,
         "ema_spread_threshold": 0.12,
         "rsi_oversold": 28, "rsi_overbought": 72,
         "rsi_pullback_range": (35, 52),
@@ -113,11 +121,13 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         "bb_entry_low": 0.22, "bb_entry_high": 0.78,
         "bb_extreme_low": 0.08, "bb_extreme_high": 0.92,
         "momentum_threshold": 0.35,
-        "sl_atr_mult": 1.2, "tp_atr_mult": 3.0,
-        "sl_min_pct": 0.40, "tp_min_rr": 2.5,
+        "sl_atr_mult": 1.2, "tp_atr_mult": 2.4,
+        "sl_min_pct": 0.40, "tp_min_rr": 2.0,
         "counter_trend_penalty": 1,
         "require_volume": False,
-        "disable_trailing": False,
+        "disable_trailing": True,
+        # 2 × 1h = 2 hours after SL
+        "cooldown_candles": 2,
     },
 }
 
@@ -339,6 +349,18 @@ class ScalperStrategy(BaseStrategy):
         if p["require_volume"] and not has_volume:
             long_score = long_score // 2
             short_score = short_score // 2
+
+        # ══════════════════════════════════════════════════════════════════
+        # ADX FILTER: In ranging markets (ADX < 20), dampen trend scores
+        # Mean-reversion entries (RSI extreme) still allowed at full score.
+        # ══════════════════════════════════════════════════════════════════
+        has_rsi_extreme_entry = (rsi is not None and
+                                 (rsi < p["rsi_oversold"] or rsi > p["rsi_overbought"]))
+        if adx_data and not adx_data.get("trending") and not has_rsi_extreme_entry:
+            # Market is ranging — trend-following entries are unreliable
+            long_score = max(0, long_score - 2)
+            short_score = max(0, short_score - 2)
+            reasons.append(f"ADX low ({adx_data.get('adx', 0):.0f}) — scores dampened")
 
         # ══════════════════════════════════════════════════════════════════
         # STOPS: ATR-adaptive, per-timeframe R:R

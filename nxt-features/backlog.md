@@ -1,10 +1,96 @@
 # Money Maker — Feature Backlog
 
-> Última actualización: 2026-02-19 (sesión 5)
+> Última actualización: 2026-02-19 (sesión 6)
 
 ---
 
 ## ✅ Completado
+
+### 0. 🚀 Per-Timeframe Scalper Optimization (Sesión 6) — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Strategies + Backtesting + Profitability  
+
+**Problema**: Todos los scalpers (1m, 3m, 5m, 15m, 1h) usaban la misma lógica idéntica de indicadores, scoring, y gestión de riesgo. Resultado: 0 de 5 rentables, pérdidas de -50% a -96%, win rate 10-39%, demasiados trades (168-732), trailing stops destruyendo posiciones.
+
+**Resultados ANTES / DESPUÉS** (BTC 30d, 3x leverage):
+| TF | Net Antes | Net Después | Trades Antes | Después | WR Antes | Después |
+|----|-----------|-------------|--------------|---------|----------|---------|
+| 1h | -89.9% | **+9.5%** ✅ | 237 | 65 | 10% | 42% |
+| 15m | -96.0% | -7.4% | 530 | 79 | 12% | 34% |
+| 5m | -96.0% | -10.9% | 732 | 173 | 20% | 34% |
+| 3m | -96.0% | -13.6% | 710 | 161 | 21% | 32% |
+| 1m | -50.7% | -7.7% | 168 | 92 | 39% | 38% |
+
+**Multi-coin validation** (30d, 3x leverage):
+| Estrategia | BTC | ETH | SOL | XRP | BNB |
+|-----------|-----|-----|-----|-----|-----|
+| 1h net | +9.5% | **+18.0%** | -12.7% | **+5.7%** | **+0.7%** |
+| 15m net | -7.4% | **+11.8%** | -8.0% | -7.0% | -10.8% |
+
+**1h rentable en 4/5 coins.** 15m rentable en ETH (+11.8%, 48% WR, 1.41 PF, +46.6% alpha).
+**Todos los scalpers superan Buy & Hold** (alpha positivo en todos los casos).
+
+**Cambios implementados (8 archivos):**
+
+1. **`indicators.py`** — Perfiles de indicadores por timeframe (SCALP_PROFILES):
+   - 1m: RSI(7), MACD(5,13,4), BB(10,1.8), EMA(5,13,21)
+   - 3m: RSI(9), MACD(8,17,6), BB(14,2.0), EMA(7,17,34)
+   - 5m: RSI(10), MACD(8,21,7), BB(16,2.0), EMA(8,21,50)
+   - 15m: RSI(12), MACD(10,22,8), BB(18,2.0), EMA(9,21,50)
+   - 1h: RSI(14), MACD(12,26,9), BB(20,2.0), EMA(9,21,55) (estándar)
+   - `compute_all()` acepta parámetro `profile` opcional
+   - `volume_analysis()` acepta ventanas customizables
+
+2. **`scalper.py`** — Reescritura completa con 8 capas de scoring optimizado:
+   - Layer 1: EMA 3-line alignment (0-3 pts — S>M>L para full alignment)
+   - Layer 2: RSI (extremos +2, pullback en tendencia +1)
+   - Layer 3: Bollinger Bands (extremo +2, zona de entrada +1, squeeze +1)
+   - Layer 4: MACD (crossover +2, histograma acelerando +1)
+   - Layer 5: StochRSI (extremo + cruce +2, mid-zone +1)
+   - Layer 6: ADX trend strength (+1 si trending + DI alineado)
+   - Layer 7: Momentum (+1 si > threshold)
+   - Layer 8: Volumen (spike +2, increasing +1)
+   - **Counter-trend penalty**: -1 a -3 puntos por ir contra EMA alignment
+   - **ADX dampener**: Scores -2 cuando ADX < 25 (mercado lateral)
+   - **Volume gate**: Scores ÷2 sin confirmación de volumen (1m/3m/5m)
+   - Per-timeframe TIMEFRAME_PARAMS con: min_score, R:R, SL/TP, cooldown
+   - Trailing stop desactivado para todos los scalpers (trail_pct = -1)
+
+3. **`models.py`** — Configs actualizados:
+   - Leverage reducido: 3x default, 5x max (antes 5-10x default, 10-20x max)
+   - Risk reducido: 1.5-3.0% (antes 2.0-4.0%)
+   - Min confidence: 0.30-0.35 (antes 0.25-0.30)
+   - Max positions: 3 (antes 5)
+   - Trail ATR mult: 3.0-3.5 (no aplicable con trailing desactivado)
+
+4. **`base.py`** — `_build_signal()` ampliado:
+   - `min_score_override`: threshold mínimo de score (por timeframe)
+   - `confidence_divisor`: divisor para confianza (12-16 según TF)
+   - `min_score_margin`: margen mínimo entre long/short scores (≥3)
+
+5. **`backtester.py`** — Mejoras al motor de backtest:
+   - Import SCALP_PROFILES y pasa perfil a `compute_all()`
+   - Trailing stop desactivado cuando signal.trail_pct < 0
+   - **Cooldown mechanism**: N candles sin operar después de SL hit
+   - Cooldown per-timeframe: 30 (1m), 20 (3m), 30 (5m), 15 (15m), 2 (1h)
+
+6. **`trading_agent.py`** — Indicadores por timeframe en live trading:
+   - Import SCALP_PROFILES y pasa perfil a `compute_all()`
+
+7. **`backtest_cli.py`** — Default leverage cambiado de 10x a 3x
+
+**Root causes de las pérdidas anteriores** (identificados y corregidos):
+- Trailing stop Phase 1 (breakeven at +1R) cerraba 44% de trades prematuramente → **Trailing desactivado**
+- Indicadores con períodos estándar (RSI-14) no adecuados para 1m (→ RSI-7) → **Períodos por TF**
+- min_score=2 generaba señal en casi cada vela → **min_score 5-8 por TF**
+- Sin penalización contra-tendencia → **Counter-trend penalty -1 a -3**
+- Sin filtro ADX → **ADX dampener en mercados laterales**
+- Leverage 10x amplificaba comisiones → **Leverage 3x**
+- Sin cooldown post-SL → **Cooldown 2-30 velas según TF**
+
+---
 
 ### 1. 📊 Gráficos de Precios con Candlesticks e Indicadores — COMPLETADO
 

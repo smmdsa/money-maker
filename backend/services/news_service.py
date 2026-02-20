@@ -147,6 +147,7 @@ class NewsService:
                     cryptocurrency=item.get("cryptocurrency"),
                     sentiment=item["sentiment"],
                     impact_score=item["impact_score"],
+                    timestamp=now,
                     url=item.get("url", ""),
                 )
                 db.add(news)

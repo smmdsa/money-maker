@@ -11,6 +11,10 @@ from datetime import datetime, timedelta
 import logging
 import asyncio
 import threading
+import fcntl
+import sys
+import os
+import atexit
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -269,7 +273,10 @@ def close_position(agent_id: int, position_id: int, db: Session = Depends(get_db
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
     try:
-        result = trading_service.close_position_manual(agent, pos, db)
+        with _trading_lock:
+            db.refresh(agent)
+            db.refresh(pos)
+            result = trading_service.close_position_manual(agent, pos, db)
         return {"status": "closed", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -281,16 +288,18 @@ def close_all_positions(agent_id: int, db: Session = Depends(get_db)):
     agent = db.query(TradingAgent).filter(TradingAgent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    positions = [p for p in agent.portfolio if p.amount > 0]
-    if not positions:
-        raise HTTPException(status_code=400, detail="No open positions")
-    results = []
-    for pos in positions:
-        try:
-            result = trading_service.close_position_manual(agent, pos, db)
-            results.append(result)
-        except Exception as e:
-            results.append({"coin": pos.cryptocurrency, "error": str(e)})
+    with _trading_lock:
+        db.refresh(agent)
+        positions = [p for p in agent.portfolio if p.amount > 0]
+        if not positions:
+            raise HTTPException(status_code=400, detail="No open positions")
+        results = []
+        for pos in positions:
+            try:
+                result = trading_service.close_position_manual(agent, pos, db)
+                results.append(result)
+            except Exception as e:
+                results.append({"coin": pos.cryptocurrency, "error": str(e)})
     return {"status": "closed", "count": len(results), "results": results}
 
 
@@ -868,6 +877,8 @@ async def run_backtest(req: BacktestRequest):
 @app.on_event("startup")
 async def startup_event():
     """Initialize database and start scheduler"""
+    # Ensure only one server instance
+    _acquire_instance_lock()
     logger.info("Starting Money Maker application...")
     
     # Initialize database
@@ -895,6 +906,34 @@ async def shutdown_event():
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+_lock_file = None
+
+def _acquire_instance_lock():
+    """Ensure only ONE server process runs at a time using an OS-level file lock."""
+    global _lock_file
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".server.lock")
+    _lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file.write(str(os.getpid()))
+        _lock_file.flush()
+        atexit.register(_release_instance_lock)
+    except OSError:
+        print(f"ERROR: Another server instance is already running. "
+              f"Kill it first or delete {lock_path}")
+        sys.exit(1)
+
+def _release_instance_lock():
+    global _lock_file
+    if _lock_file:
+        try:
+            fcntl.flock(_lock_file, fcntl.LOCK_UN)
+            _lock_file.close()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     import uvicorn
+    _acquire_instance_lock()
     uvicorn.run(app, host="0.0.0.0", port=8001)
