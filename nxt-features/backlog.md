@@ -1,6 +1,6 @@
 # Money Maker — Feature Backlog
 
-> Última actualización: 2026-02-19 (sesión 4)
+> Última actualización: 2026-02-19 (sesión 5)
 
 ---
 
@@ -110,11 +110,11 @@
 | **Trend Rider v2** | Trend Following | 3x | 5x | 3 | 2.5% | 0.55 | Paul Tudor Jones |
 | **Mean Reversion** | Mean Reversion | 2x | 3x | 4 | 1.5% | 0.50 | Jim Simons / RenTech |
 | **Momentum Sniper** | Momentum | 4x | 7x | 2 | 2.5% | 0.60 | Jesse Livermore |
-| **Scalper Pro 1h** | Scalping | 5x | 10x | 5 | 4.0% | 0.50 | Market Makers |
-| **Scalper Pro 1m** | Scalping | 10x | 20x | 5 | 2.0% | 0.50 | HFT |
-| **Scalper Pro 3m** | Scalping | 8x | 15x | 5 | 2.5% | 0.50 | HFT |
-| **Scalper Pro 5m** | Scalping | 7x | 12x | 5 | 3.0% | 0.50 | Daytrading |
-| **Scalper Pro 15m** | Scalping | 6x | 10x | 5 | 3.5% | 0.50 | Swing Scalping |
+| **Scalper Pro 1h** | Scalping | 5x | 10x | 5 | 4.0% | 0.30 | Market Makers |
+| **Scalper Pro 1m** | Scalping | 10x | 20x | 5 | 2.0% | 0.25 | HFT |
+| **Scalper Pro 3m** | Scalping | 8x | 15x | 5 | 2.5% | 0.25 | HFT |
+| **Scalper Pro 5m** | Scalping | 7x | 12x | 5 | 3.0% | 0.25 | Daytrading |
+| **Scalper Pro 15m** | Scalping | 6x | 10x | 5 | 3.5% | 0.30 | Swing Scalping |
 | **Grid Trader** | Grid / Systematic | 2x | 3x | 8 | 1.0% | 0.40 | Quant desks |
 | **Confluence Master** | Multi-factor | 5x | 10x | 2 | 3.0% | 0.70 | Institutional |
 
@@ -687,6 +687,122 @@ wss://fstream.binance.com/ws/btcusdt@ticker
 
 ---
 
+### 8. 🔧 Scalper Strategy Overhaul — Corrección Crítica Trade Generation — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-19  
+**Área**: Trading / Estrategias / Market Data
+
+**Problema detectado**: Tras 24+ horas de ejecución con agentes scalper activos, **0 trades se abrieron**. Análisis profundo reveló 6 bloqueadores críticos actuando en conjunto.
+
+#### 6 Bloqueadores Encontrados y Corregidos
+
+| # | Bloqueador | Impacto | Solución |
+|---|-----------|---------|----------|
+| 1 | **OHLC usaba velas DIARIAS** para todas las estrategias — RSI/EMA/BB calculados sobre datos diarios no se mueven para scalping | 🔴 Crítico | `kline_interval` por estrategia + `get_ohlc_interval()` para velas 1m/3m/5m/15m/1h |
+| 2 | **Umbral de entrada score ≥ 3 hardcodeado** con `confidence = score/10` — casi imposible alcanzar en datos diarios | 🔴 Crítico | Scalping usa `min_score_to_act = 2` y `confidence = score/8` |
+| 3 | **Solo 8 large-cap coins** (BTC, ETH, etc.) — las menos volátiles de crypto | 🟡 Alto | +15 tokens volátiles mid-cap (AVAX, LINK, NEAR, SUI, PEPE, APT, ARB, FIL, RENDER, INJ, FET, BONK, FLOKI, SEI, WIF) |
+| 4 | **Solo top 6 coins escaneadas** por ciclo | 🟡 Alto | `scan_limit` configurable por estrategia — scalpers escanean 15 coins |
+| 5 | **Cache OHLC = 900s** (15 min) | 🟡 Medio | Cache adaptativo: 30s (1m), 60s (3m), 90s (5m), 180s (15m), 300s (1h) |
+| 6 | **Condiciones RSI demasiado estrechas** + penalización counter-trend | 🟡 Medio | RSI ampliado, entradas mean-reversion, sin penalización counter-trend |
+
+#### Cambios en StrategyConfig
+
+Nuevos campos añadidos a `StrategyConfig`:
+
+| Campo | Tipo | Default | Descripción |
+|-------|------|---------|-------------|
+| `kline_interval` | str | `""` | Intervalo Binance (1m/3m/5m/15m/1h). Vacío = daily |
+| `scan_limit` | int | 6 | Cuántos coins escanear por ciclo |
+
+Valores por variante scalper:
+
+| Variante | Interval | Scan | min_confidence |
+|----------|:--------:|:----:|:--------------:|
+| scalper (1h) | `1h` | 15 | 0.30 |
+| scalper_1m | `1m` | 15 | 0.25 |
+| scalper_3m | `3m` | 15 | 0.25 |
+| scalper_5m | `5m` | 15 | 0.25 |
+| scalper_15m | `15m` | 15 | 0.30 |
+
+#### Reescritura del Scalper Strategy (7 capas)
+
+| Capa | Antes | Después |
+|------|-------|--------|
+| 1. EMA Trend | EMA 9>21 (+1) | EMA 9>21 con **spread bonus** (+1 extra si spread > 0.1%) |
+| 2. RSI | Solo pullback 30-48 en uptrend | **Múltiples zonas**: pullback (35-55), extremos (<30/>70), zona suave (<40/>60) |
+| 3. BB | Solo con trend confirmado | **Posición absoluta** + squeeze breakout anticipation |
+| 4. MACD | Crossover o histogram | Crossover + **histogram acceleration** (momentum building) |
+| 5. StochRSI | Solo cross from extreme | Cross from extreme + **mid-zone momentum** |
+| 6. Momentum | No existía | **Precio vs SMA7** (±0.3% threshold) |
+| 7. Volume | Solo "increasing" | **Spike detection** (2x avg) como confirmación fuerte |
+| Penalty | -2 counter-trend | **Ninguna** — scalping tradea en ambas direcciones |
+| R:R | 3:1 (ATR×1 SL, ATR×3 TP) | **2:1** (ATR×0.8 SL, ATR×1.6 TP) — salidas más rápidas |
+
+#### 15 Tokens Volátiles Añadidos
+
+| Token | ID CoinGecko | Binance Futures | ATR% 5m típico |
+|-------|-------------|:---------------:|:--------------:|
+| Avalanche | avalanche-2 | AVAXUSDT | ~0.19% |
+| Chainlink | chainlink | LINKUSDT | ~0.20% |
+| NEAR | near | NEARUSDT | ~0.27% |
+| SUI | sui | SUIUSDT | ~0.25% |
+| PEPE | pepe | 1000PEPEUSDT | ~0.26% |
+| Aptos | aptos | APTUSDT | ~0.27% |
+| Arbitrum | arbitrum | ARBUSDT | ~0.40% |
+| Filecoin | filecoin | FILUSDT | ~0.32% |
+| Render | render-token | RENDERUSDT | ~0.34% |
+| Injective | injective-protocol | INJUSDT | ~0.68% |
+| Fetch.ai | fetch-ai | FETUSDT | ~0.25% |
+| BONK | bonk | 1000BONKUSDT | ~0.22% |
+| FLOKI | floki | 1000FLOKIUSDT | ~0.23% |
+| SEI | sei-network | SEIUSDT | ~0.31% |
+| WIF | wif | WIFUSDT | ~0.26% |
+
+**Nota**: PEPE, BONK y FLOKI usan formato `1000XXXUSDT` en Binance Futures (precios escalados ×1000).
+
+#### Market Data: `get_ohlc_interval()`
+
+Nuevo método en `BinanceProvider` y `MarketDataService`:
+
+```python
+# Fetch 200 velas de 5 minutos para SUI
+ohlc = market_service.get_ohlc_interval("sui", "5m", 200)
+```
+
+Cache TTL por intervalo:
+
+| Intervalo | Cache TTL |
+|:---------:|:---------:|
+| 1m | 30s |
+| 3m | 60s |
+| 5m | 90s |
+| 15m | 180s |
+| 1h | 300s |
+
+#### Resultado del Fix
+
+**Test con datos reales** (5m candles, momento del fix):
+
+| Antes | Después |
+|:-----:|:-------:|
+| 0/8 coins con señal | **21/23 coins con señal actionable** |
+| 0 trades en 24h | Señales long y short generándose cada ciclo |
+| RSI ~50 en daily (sin movimiento) | RSI varía 25-75 en 5m candles |
+| Score máx ~2 (nunca llega a 3) | Scores de 3-10 frecuentemente |
+
+**Archivos creados / modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `backend/services/strategies/scalper.py` | **REESCRITO** — 7 capas agresivas, sin counter-trend penalty, 2:1 R:R |
+| `backend/services/strategies/models.py` | +`kline_interval`, +`scan_limit` en StrategyConfig; `min_confidence` reducido en scalpers |
+| `backend/services/strategies/base.py` | `_build_signal()` — threshold dinámico para scalping (score≥2, conf=score/8) |
+| `backend/services/trading_agent.py` | `_compute_indicators()` acepta `strategy_key`, usa `get_ohlc_interval()` para scalping; `_scan_for_best_signal()` usa `scan_limit` |
+| `backend/services/market_data.py` | +15 tokens en SYMBOL_MAP/supported_coins, `SCALP_INTERVALS`, `get_ohlc_interval()` en BinanceProvider y MarketDataService, cache TTL adaptativo |
+
+---
+
 ### 6. 🔔 Notificaciones + Alertas (Telegram / Email)
 
 **Impacto**: Alto  
@@ -716,7 +832,7 @@ Bot de Telegram y/o email para notificar:
 | A3 | Correlación entre monedas para diversificación | Medio | Pendiente |
 | A4 | Pattern recognition (double bottom, H&S, etc.) | Medio | Pendiente |
 | A5 | Social sentiment (X/Reddit scraping) | Medio | Deprioritizado (ya tenemos LLM + RSS news) |
-| A6 | Multi-timeframe analysis (1H, 4H, 1D) | Alto | ✅ Parcial (5 variantes Scalper + backtester multi-period) |
+| A6 | Multi-timeframe analysis (1H, 4H, 1D) | Alto | ✅ Completado (kline_interval por estrategia + 5 variantes Scalper) |
 
 ### Trading / Estrategia
 
@@ -786,12 +902,13 @@ Bot de Telegram y/o email para notificar:
 5c. Chart Price Sync ──→ ✅ COMPLETADO (2026-02-19)
 5d. Account Profiles (Micro/Small/Std/Large) ──→ ✅ COMPLETADO (2026-02-19)
 7.  Market Clocks (World Markets) ──→ ✅ COMPLETADO (2026-02-19)
+8.  Scalper Strategy Overhaul ──→ ✅ COMPLETADO (2026-02-19)
 ─── Próximo ciclo (Top 5) ───────────────────────────────
-8.  Trailing SL + Trailing TP (B5+B6) ──→ 🔜 next
-9.  Fear & Greed Index (A1) ──→ 🔜 next
-10. Notificaciones Telegram (#6) ──→ 🔜 next
-11. Export CSV de Trades (C4) ──→ 🔜 next
-12. On-chain / Whale Alerts (A2) ──→ 🔜 next
+9.  Trailing SL + Trailing TP (B5+B6) ──→ 🔜 next
+10. Fear & Greed Index (A1) ──→ 🔜 next
+11. Notificaciones Telegram (#6) ──→ 🔜 next
+12. Export CSV de Trades (C4) ──→ 🔜 next
+13. On-chain / Whale Alerts (A2) ──→ 🔜 next
 ─── Futuro ──────────────────────────────────────────────
 5e. Risk Monitor (WebSocket) ──→ planificado (Fase 2)
 ```
@@ -804,12 +921,13 @@ Bot de Telegram y/o email para notificar:
 |------------|-----------|---------|
 | Backend | FastAPI + uvicorn | Puerto 8001, 21+ endpoints + WebSocket |
 | Base de datos | SQLite + SQLAlchemy | 6 modelos (TradingAgent, Portfolio, Trade, Decision, PortfolioSnapshot, NewsEvent) |
-| Market Data (primary) | **Binance API** | 1200 req/min, sin API key, precios + OHLC + históricos + volumen |
+| Market Data (primary) | **Binance API** | 1200 req/min, sin API key, precios + OHLC + históricos + volumen + kline intervals (1m-1h) |
 | Market Data (fallback) | CoinGecko API | 10 req/min free tier, RateLimiter con 5s max wait |
 | Noticias | RSS feeds | CoinDesk, CoinTelegraph, Bitcoin Magazine + CryptoPanic (opcional) |
 | Charts | TradingView Lightweight Charts v4 | CDN, open source, candlestick + indicadores + price sync |
 | Indicadores | RSI, MACD, BB, EMA, SMA, ATR, ADX, StochRSI, Volume | Library completa en strategies.py |
-| Estrategias | 10 (trend/mean_rev/momentum/scalper×5/grid/confluence) | StrategyEngine con scoring + signal generation |
+| Estrategias | 10 (trend/mean_rev/momentum/scalper×5/grid/confluence) | StrategyEngine con scoring + signal generation, timeframe-aware |
+| Tokens | 23 (8 large-cap + 15 mid-cap volátiles) | BTC, ETH, BNB, ADA, SOL, XRP, DOT, DOGE + AVAX, LINK, NEAR, SUI, PEPE, APT, ARB, FIL, RENDER, INJ, FET, BONK, FLOKI, SEI, WIF |
 | Backtesting | Motor completo con commission model | Replay de klines, dual balance (gross/net), funding rate |
 | CLI | backtest_cli.py | Comparativas rápidas, --compare, --scalpers |
 | Futuros | LONG/SHORT, leverage 1-125x, liquidation, SL/TP | Position sizing profesional |
@@ -825,7 +943,7 @@ Bot de Telegram y/o email para notificar:
 | `main.py` | 735+ | Endpoints, scheduler, WebSocket, backtest API, market hours |
 | `backend/services/strategies.py` | 1410+ | Indicadores técnicos, 10 estrategias, position sizing con risk overrides |
 | `backend/services/backtester.py` | 700+ | Motor de backtesting, commission model, sliding window |
-| `backend/services/market_data.py` | 795+ | RateLimiter, BinanceProvider (Futures+Spot), MarketDataService, get_fresh_prices |
+| `backend/services/market_data.py` | 905+ | RateLimiter, BinanceProvider (Futures+Spot), MarketDataService, get_fresh_prices, get_ohlc_interval, 23 tokens |
 | `backend/services/trading_agent.py` | 770+ | Futures lifecycle, strategy engine, LLM integration, risk monitor, market hours context |
 | `backend/services/llm_service.py` | 270 | Gemini 2.0 Flash, LLMAnalysis, rate limiting |
 | `backend/services/news_service.py` | 313 | RSS feeds, sentimiento por keywords |

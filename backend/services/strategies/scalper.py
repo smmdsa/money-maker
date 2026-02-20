@@ -1,9 +1,10 @@
 """
-Scalper Pro Strategy — Professional trend-following pullback scalper.
+Scalper Pro Strategy — Aggressive short-term scalper.
 
-Trades WITH the short-term trend (EMA9 vs EMA21).
-Enters on pullbacks (RSI dips/bounces) with BB confirmation.
-ATR-adaptive stops with 3:1 R:R.
+Designed to generate frequent trades using short-timeframe candles.
+Enters on micro-trends, pullbacks, momentum bursts, and mean-reversion extremes.
+Lower entry threshold (score >= 2) for high trade frequency.
+ATR-adaptive stops with 2:1 R:R (tighter than swing strategies).
 Used for all scalper variants (1h, 1m, 3m, 5m, 15m).
 """
 from typing import Dict
@@ -38,98 +39,144 @@ class ScalperStrategy(BaseStrategy):
         macd = ind.get("macd")
         vol = ind.get("volume")
 
-        # LAYER 1: Short-term Trend (EMA alignment)
+        # ── LAYER 1: Micro-Trend (EMA 9 vs 21) ──────────────────────────
         trend_up = False
         trend_down = False
 
         if ema9 and ema21:
+            ema_spread = abs(ema9 - ema21) / ema21 * 100 if ema21 > 0 else 0
             if ema9 > ema21:
                 trend_up = True
                 long_score += 1
+                if ema_spread > 0.1:  # clear separation
+                    long_score += 1
+                    reasons.append(f"EMA9>21 spread {ema_spread:.2f}%")
             else:
                 trend_down = True
                 short_score += 1
-
-            if ema55:
-                if ema9 > ema21 > ema55:
-                    long_score += 1
-                    reasons.append("EMA alignment bullish (9>21>55)")
-                elif ema9 < ema21 < ema55:
+                if ema_spread > 0.1:
                     short_score += 1
-                    reasons.append("EMA alignment bearish (9<21<55)")
+                    reasons.append(f"EMA9<21 spread {ema_spread:.2f}%")
 
-        # LAYER 2: Pullback Entry (RSI)
+        # ── LAYER 2: RSI — Multiple zones, not just pullbacks ─────────────
         if rsi is not None:
-            if trend_up and 30 <= rsi <= 48:
-                long_score += 2
-                reasons.append(f"Uptrend pullback: RSI {rsi:.0f}")
-            elif trend_down and 52 <= rsi <= 70:
-                short_score += 2
-                reasons.append(f"Downtrend bounce: RSI {rsi:.0f}")
-            elif rsi < 25:
-                long_score += 2
-                reasons.append(f"Extreme oversold: RSI {rsi:.0f}")
-            elif rsi > 75:
-                short_score += 2
-                reasons.append(f"Extreme overbought: RSI {rsi:.0f}")
+            # Trend-with-pullback entries
+            if trend_up and 35 <= rsi <= 55:
+                long_score += 1
+                reasons.append(f"RSI pullback in uptrend: {rsi:.0f}")
+            elif trend_down and 45 <= rsi <= 65:
+                short_score += 1
+                reasons.append(f"RSI bounce in downtrend: {rsi:.0f}")
 
-        # LAYER 3: Bollinger Band position
+            # Mean-reversion extremes (works even without trend)
+            if rsi < 30:
+                long_score += 2
+                reasons.append(f"RSI oversold: {rsi:.0f}")
+            elif rsi > 70:
+                short_score += 2
+                reasons.append(f"RSI overbought: {rsi:.0f}")
+
+            # Mild oversold/overbought
+            if rsi < 40 and not trend_down:
+                long_score += 1
+            elif rsi > 60 and not trend_up:
+                short_score += 1
+
+        # ── LAYER 3: Bollinger Band — Position + Squeeze ─────────────────
         if bb:
-            if trend_up and bb["pct_b"] < 0.30:
-                long_score += 1
-                reasons.append(f"Price near lower BB ({bb['pct_b']:.2f})")
-            elif trend_down and bb["pct_b"] > 0.70:
-                short_score += 1
-                reasons.append(f"Price near upper BB ({bb['pct_b']:.2f})")
-            if bb["pct_b"] < 0.05:
-                long_score += 1
-                reasons.append("BB extreme low")
-            elif bb["pct_b"] > 0.95:
-                short_score += 1
-                reasons.append("BB extreme high")
+            pct_b = bb["pct_b"]
+            squeeze = bb.get("squeeze", False)
 
-        # LAYER 4: MACD Momentum Confirmation
+            if pct_b < 0.20:
+                long_score += 1
+                reasons.append(f"Price at lower BB ({pct_b:.2f})")
+            elif pct_b > 0.80:
+                short_score += 1
+                reasons.append(f"Price at upper BB ({pct_b:.2f})")
+
+            if pct_b < 0.05:
+                long_score += 1
+                reasons.append("BB extreme low — bounce expected")
+            elif pct_b > 0.95:
+                short_score += 1
+                reasons.append("BB extreme high — rejection expected")
+
+            # Squeeze breakout anticipation
+            if squeeze:
+                if trend_up:
+                    long_score += 1
+                    reasons.append("BB squeeze — bullish breakout expected")
+                elif trend_down:
+                    short_score += 1
+                    reasons.append("BB squeeze — bearish breakout expected")
+
+        # ── LAYER 4: MACD — Crossover + Histogram Momentum ──────────────
         if macd:
             hist = macd.get("histogram", 0)
+            prev_hist = macd.get("prev_histogram", 0)
             crossover = macd.get("crossover", "none")
+
             if crossover == "bullish":
                 long_score += 2
                 reasons.append("MACD bullish crossover")
             elif crossover == "bearish":
                 short_score += 2
                 reasons.append("MACD bearish crossover")
-            elif hist > 0 and long_score > short_score:
-                long_score += 1
-            elif hist < 0 and short_score > long_score:
-                short_score += 1
 
-        # LAYER 5: Stochastic RSI crossover
+            # Histogram acceleration (momentum building)
+            if hist > 0 and prev_hist > 0 and hist > prev_hist:
+                long_score += 1
+                reasons.append("MACD histogram accelerating up")
+            elif hist < 0 and prev_hist < 0 and hist < prev_hist:
+                short_score += 1
+                reasons.append("MACD histogram accelerating down")
+
+        # ── LAYER 5: Stochastic RSI — Crosses ───────────────────────────
         if stoch:
-            if stoch["k"] > stoch["d"] and stoch["oversold"]:
+            k, d = stoch["k"], stoch["d"]
+            if k > d and stoch["oversold"]:
                 long_score += 1
                 reasons.append("StochRSI cross up from oversold")
-            elif stoch["k"] < stoch["d"] and stoch["overbought"]:
+            elif k < d and stoch["overbought"]:
                 short_score += 1
                 reasons.append("StochRSI cross down from overbought")
 
-        # LAYER 6: Volume confirmation
-        if vol and vol.get("increasing"):
-            if long_score > short_score:
+            # Mid-zone momentum
+            if k > d and 20 < k < 80:
                 long_score += 1
-                reasons.append("Volume increasing")
-            elif short_score > long_score:
+            elif k < d and 20 < k < 80:
                 short_score += 1
-                reasons.append("Volume increasing")
 
-        # COUNTER-TREND PENALTY
-        if trend_up and short_score > long_score:
-            short_score = max(0, short_score - 2)
-        if trend_down and long_score > short_score:
-            long_score = max(0, long_score - 2)
+        # ── LAYER 6: Momentum (price vs SMA7) ───────────────────────────
+        if mom != 0:
+            if mom > 0.3:
+                long_score += 1
+                reasons.append(f"Momentum +{mom:.1f}%")
+            elif mom < -0.3:
+                short_score += 1
+                reasons.append(f"Momentum {mom:.1f}%")
 
-        # STOPS: ATR-adaptive 3:1 R:R
-        sl = max(atr_pct * 1.0, 0.6)
-        tp = max(atr_pct * 3.0, sl * 3.0)
+        # ── LAYER 7: Volume confirmation ─────────────────────────────────
+        if vol:
+            if vol.get("spike"):
+                # Volume spike = strong confirmation
+                if long_score > short_score:
+                    long_score += 1
+                    reasons.append("Volume spike confirms")
+                elif short_score > long_score:
+                    short_score += 1
+                    reasons.append("Volume spike confirms")
+            elif vol.get("increasing"):
+                if long_score > short_score:
+                    long_score += 1
+                elif short_score > long_score:
+                    short_score += 1
+
+        # ── NO COUNTER-TREND PENALTY (scalping trades both directions) ───
+
+        # ── STOPS: ATR-adaptive with 2:1 R:R for scalping ───────────────
+        sl = max(atr_pct * 0.8, 0.3)       # tighter SL for scalping
+        tp = max(atr_pct * 1.6, sl * 2.0)   # 2:1 R:R minimum
         trail = max(atr_pct * cfg.trail_atr_mult, sl)
 
         return self._build_signal(

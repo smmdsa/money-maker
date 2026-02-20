@@ -5,6 +5,7 @@ from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func, distinct
 from typing import List, Optional
 from datetime import datetime, timedelta
 import logging
@@ -319,26 +320,86 @@ def delete_agent(agent_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/agents/{agent_id}/trades")
-def get_agent_trades(agent_id: int, limit: int = 50, db: Session = Depends(get_db)):
-    """Get trading history for an agent"""
-    trades = db.query(Trade).filter(Trade.agent_id == agent_id).order_by(
-        Trade.timestamp.desc()
-    ).limit(limit).all()
+def get_agent_trades(
+    agent_id: int,
+    limit: int = 50,
+    offset: int = 0,
+    symbol: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get trading history for an agent with optional filters"""
+    query = db.query(Trade).filter(Trade.agent_id == agent_id)
     
-    return [{
-        "id": t.id,
-        "cryptocurrency": t.cryptocurrency,
-        "symbol": t.symbol,
-        "trade_type": t.trade_type,
-        "amount": t.amount,
-        "price": t.price,
-        "total_value": t.total_value,
-        "profit_loss": t.profit_loss,
-        "leverage": t.leverage,
-        "margin": t.margin,
-        "decision_id": t.decision_id,
-        "timestamp": t.timestamp.isoformat()
-    } for t in trades]
+    # Apply filters
+    if symbol:
+        query = query.filter(Trade.symbol == symbol)
+    if from_date:
+        try:
+            fd = datetime.fromisoformat(from_date)
+            query = query.filter(Trade.timestamp >= fd)
+        except ValueError:
+            pass
+    if to_date:
+        try:
+            td = datetime.fromisoformat(to_date)
+            # Include the entire end day
+            td = td.replace(hour=23, minute=59, second=59)
+            query = query.filter(Trade.timestamp <= td)
+        except ValueError:
+            pass
+    
+    # Get total count and PnL summary before pagination
+    total = query.count()
+    summary_row = query.with_entities(
+        func.sum(Trade.profit_loss),
+        func.count(Trade.id)
+    ).first()
+    
+    total_pnl = summary_row[0] or 0.0
+    
+    # Winning / losing trades (only count closing trades with non-zero PnL)
+    winning = query.filter(Trade.profit_loss > 0).count()
+    losing = query.filter(Trade.profit_loss < 0).count()
+    
+    # Fetch paginated trades
+    trades = query.order_by(
+        Trade.timestamp.desc()
+    ).offset(offset).limit(limit).all()
+    
+    return {
+        "trades": [{
+            "id": t.id,
+            "cryptocurrency": t.cryptocurrency,
+            "symbol": t.symbol,
+            "trade_type": t.trade_type,
+            "amount": t.amount,
+            "price": t.price,
+            "total_value": t.total_value,
+            "profit_loss": t.profit_loss,
+            "leverage": t.leverage,
+            "margin": t.margin,
+            "decision_id": t.decision_id,
+            "timestamp": t.timestamp.isoformat()
+        } for t in trades],
+        "total": total,
+        "summary": {
+            "total_pnl": round(total_pnl, 4),
+            "winning_trades": winning,
+            "losing_trades": losing,
+            "total_trades": total
+        }
+    }
+
+
+@app.get("/api/agents/{agent_id}/traded-tokens")
+def get_traded_tokens(agent_id: int, db: Session = Depends(get_db)):
+    """Get list of unique tokens traded by an agent"""
+    tokens = db.query(distinct(Trade.symbol)).filter(
+        Trade.agent_id == agent_id
+    ).order_by(Trade.symbol).all()
+    return [t[0] for t in tokens]
 
 
 @app.get("/api/decisions/{decision_id}")

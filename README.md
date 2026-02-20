@@ -5,6 +5,7 @@ Plataforma de simulación de trading de futuros de criptomonedas con 10 estrateg
 ## Características
 
 - **10 Estrategias Cuantitativas** — Trend Rider, Mean Reversion, Momentum Sniper, Scalper Pro (1h/1m/3m/5m/15m), Grid Trader, Confluence Master
+- **Exit Timing por Estrategia** — Cada estrategia puede implementar su propia lógica de salida via override de `_check_exit_signal()` (Open/Closed Principle)
 - **Futuros con Apalancamiento** — Long/Short con leverage configurable por estrategia
 - **Backtesting Histórico** — CLI con comparación multi-estrategia y multi-coin
 - **Trailing Stop ATR + Breakeven** — Sistema de trailing en 2 fases (breakeven at +1R, luego Chandelier K×ATR)
@@ -65,9 +66,9 @@ money-maker/
 │           ├── __init__.py          #    Re-exports públicos
 │           ├── models.py            #    Signal, StrategyConfig, STRATEGIES dict
 │           ├── indicators.py        #    Indicators (RSI, MACD, BB, ATR, ADX, StochRSI, Volume)
-│           ├── base.py              #    BaseStrategy + _build_signal compartido
+│           ├── base.py              #    BaseStrategy + _build_signal + _check_exit_signal (overridable)
 │           ├── engine.py            #    StrategyEngine (dispatcher) + position sizing
-│           ├── trend_rider.py       #    Trend Rider (EMA alignment + ADX + pullback)
+│           ├── trend_rider.py       #    Trend Rider v3.1 (8 layers + custom exit timing)
 │           ├── mean_reversion.py    #    Mean Reversion (BB + RSI extremes)
 │           ├── momentum_sniper.py   #    Momentum Sniper (MACD + volume spike)
 │           ├── scalper.py           #    Scalper Pro (all timeframes: 1h/1m/3m/5m/15m)
@@ -94,7 +95,7 @@ from backend.services.strategies import (
 
 | Estrategia | Estilo | Leverage | R:R | Trail ATR Mult | Descripción |
 |---|---|---|---|---|---|
-| **Trend Rider** | Trend | 3-5x | 3:1 | 3.0 | EMA 9>21>55 + ADX + pullback RSI |
+| **Trend Rider** | Trend | 3-5x | 2.25:1 | 3.0 | 8 layers: EMA alignment + slope + ADX/DI + RSI pullback + MACD + BB + StochRSI + Volume. Custom exit: winners run en tendencia alineada |
 | **Mean Reversion** | Mean Rev | 2-3x | 1.7:1 | 2.0 | BB extremes + RSI oversold/overbought |
 | **Momentum Sniper** | Momentum | 4-7x | 2.7:1 | 2.5 | MACD crossover + volume spike |
 | **Scalper Pro 1h** | Scalping | 5-10x | 3:1 | 2.5 | Trend-pullback (6 layers) |
@@ -109,6 +110,15 @@ from backend.services.strategies import (
 
 1. **Breakeven (Phase 1)**: Cuando el precio se mueve +1R a favor (1× distancia SL desde entry), el SL se mueve a entry price → trade sin riesgo.
 2. **Chandelier (Phase 2)**: Cuando el precio se mueve ≥ trail_pct desde entry, el SL trailing sigue al precio a `K × ATR` de distancia del mejor precio alcanzado.
+
+### Exit Timing por Estrategia (Override Pattern)
+
+Cada estrategia puede personalizar cuándo cerrar posiciones sobreescribiendo `_check_exit_signal()` en su clase:
+
+- **Default (base.py):** cierra en reversal (score opuesto ≥ 3) o SL/TP
+- **Trend Rider:** exit timing adaptativo — si está ganando Y la tendencia EMA sigue alineada, requiere score ≥ 5 con ventaja ≥ +2 para cerrar (deja correr ganadores). Posiciones perdedoras o sin alineación usan el threshold default
+
+Esto sigue el **Open/Closed Principle**: base.py no se modifica, cada estrategia extiende su comportamiento.
 
 ---
 
@@ -174,8 +184,27 @@ class MiEstrategiaStrategy(BaseStrategy):
 - Requiere `min_score_to_act = 3` para abrir posición
 - Calcula confidence como `max_score / 10.0` (capped 0.95)
 - Verifica `confidence >= cfg.min_confidence` antes de emitir señal
-- Gestiona close signals automáticamente (SL/TP hit, reversals)
+- Delega exit checks a `_check_exit_signal()` (overridable per-strategy)
 - Pasa `trail_pct` al Signal para el sistema de trailing
+
+### Paso 1.5 (Opcional): Override de Exit Timing
+
+Para personalizar cuándo cerrar posiciones, sobreescribir `_check_exit_signal()`:
+
+```python
+from typing import Optional
+
+class MiEstrategiaStrategy(BaseStrategy):
+
+    def _check_exit_signal(self, has_long, has_short, long_score, short_score,
+                           entry_price, current_price, stop_loss_pct, take_profit_pct,
+                           confidence, leverage, reasoning_str, trail_pct) -> Optional[Signal]:
+        """Custom exit: solo cerrar winners si el reversal es fuerte."""
+        # Retornar Signal para cerrar, o None para mantener abierto
+        # Ver trend_rider.py como ejemplo completo
+        ...
+        return None  # delega al default
+```
 
 ### Paso 2: Registrar la configuración
 
@@ -237,7 +266,7 @@ El dict `indicators` que recibe `evaluate()` contiene:
 | `bb` | `dict` | `{upper, middle, lower, width_pct, pct_b, squeeze}` |
 | `atr` | `float` | ATR absoluto (14) |
 | `atr_pct` | `float` | ATR como % del precio |
-| `adx` | `dict` | `{adx, plus_di, minus_di, trending, strong_trend}` |
+| `adx` | `dict` | `{adx, plus_di, minus_di, trending, strong_trend, di_crossover}` |
 | `stoch_rsi` | `dict` | `{k, d, oversold, overbought}` |
 | `volume` | `dict` | `{ratio, increasing, spike, avg_volume}` |
 | `ema_9` | `float` | EMA 9 periodos |
@@ -246,6 +275,8 @@ El dict `indicators` que recibe `evaluate()` contiene:
 | `sma_7` | `float` | SMA 7 periodos |
 | `sma_21` | `float` | SMA 21 periodos |
 | `sma_50` | `float` | SMA 50 periodos |
+| `ema21_slope` | `float` | Pendiente EMA 21 (% cambio últimas 5 velas) |
+| `ema55_slope` | `float` | Pendiente EMA 55 (% cambio últimas 5 velas) |
 | `momentum` | `float` | `(price - SMA7) / SMA7 * 100` |
 
 ---

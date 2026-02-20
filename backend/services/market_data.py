@@ -80,6 +80,22 @@ class BinanceProvider:
         "ripple": "XRPUSDT",
         "polkadot": "DOTUSDT",
         "dogecoin": "DOGEUSDT",
+        # ── Volatile mid-caps (great for scalping) ──
+        "avalanche-2": "AVAXUSDT",
+        "chainlink": "LINKUSDT",
+        "near": "NEARUSDT",
+        "sui": "SUIUSDT",
+        "pepe": "1000PEPEUSDT",
+        "aptos": "APTUSDT",
+        "arbitrum": "ARBUSDT",
+        "filecoin": "FILUSDT",
+        "render-token": "RENDERUSDT",
+        "injective-protocol": "INJUSDT",
+        "fetch-ai": "FETUSDT",
+        "bonk": "1000BONKUSDT",
+        "floki": "1000FLOKIUSDT",
+        "sei-network": "SEIUSDT",
+        "wif": "WIFUSDT",
     }
 
     # Reverse map
@@ -90,6 +106,12 @@ class BinanceProvider:
         "bitcoin": "Bitcoin", "ethereum": "Ethereum", "binancecoin": "BNB",
         "cardano": "Cardano", "solana": "Solana", "ripple": "XRP",
         "polkadot": "Polkadot", "dogecoin": "Dogecoin",
+        "avalanche-2": "Avalanche", "chainlink": "Chainlink",
+        "near": "NEAR", "sui": "SUI", "pepe": "PEPE",
+        "aptos": "Aptos", "arbitrum": "Arbitrum", "filecoin": "Filecoin",
+        "render-token": "Render", "injective-protocol": "Injective",
+        "fetch-ai": "Fetch.ai", "bonk": "BONK", "floki": "FLOKI",
+        "sei-network": "SEI", "wif": "WIF",
     }
 
     # Kline interval mapping (days → Binance interval)
@@ -100,6 +122,15 @@ class BinanceProvider:
         30: ("1d", 30),     # 30 days → daily
         90: ("1d", 90),
         365: ("1d", 365),
+    }
+
+    # Direct interval fetching for scalping strategies
+    SCALP_INTERVALS = {
+        "1m": 200,    # 200 × 1m candles (~3.3 hours)
+        "3m": 200,    # 200 × 3m candles (~10 hours)
+        "5m": 200,    # 200 × 5m candles (~16.6 hours)
+        "15m": 200,   # 200 × 15m candles (~2 days)
+        "1h": 200,    # 200 × 1h candles (~8 days)
     }
 
     def __init__(self):
@@ -376,6 +407,55 @@ class BinanceProvider:
             logger.warning(f"Binance Spot OHLC also failed for {coin}: {e}")
             return []
 
+    def get_ohlc_interval(self, coin: str, interval: str = "1h", limit: int = 200) -> List[Dict]:
+        """Fetch OHLC klines for a specific Binance interval (1m, 3m, 5m, 15m, 1h, etc.).
+        Used by scalping strategies that need exact candle timeframes."""
+        try:
+            sym = self.SYMBOL_MAP.get(coin)
+            if not sym:
+                return []
+
+            resp = self._session.get(
+                f"{self.FUTURES_URL}/klines",
+                params={"symbol": sym, "interval": interval, "limit": limit},
+                timeout=15
+            )
+            resp.raise_for_status()
+
+            ohlc = []
+            for k in resp.json():
+                ohlc.append({
+                    "timestamp": datetime.fromtimestamp(k[0] / 1000),
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5])
+                })
+
+            if ohlc:
+                logger.debug(f"Binance: {len(ohlc)} × {interval} candles for {coin}")
+            return ohlc
+
+        except Exception as e:
+            logger.warning(f"Binance Futures {interval} klines failed for {coin}: {e}")
+            # Fallback to spot
+            try:
+                resp = self._session.get(
+                    f"{self.SPOT_URL}/klines",
+                    params={"symbol": sym, "interval": interval, "limit": limit},
+                    timeout=15
+                )
+                resp.raise_for_status()
+                return [{
+                    "timestamp": datetime.fromtimestamp(k[0] / 1000),
+                    "open": float(k[1]), "high": float(k[2]),
+                    "low": float(k[3]), "close": float(k[4]),
+                    "volume": float(k[5])
+                } for k in resp.json()]
+            except Exception:
+                return []
+
 
 # ── Main Market Data Service ─────────────────────────────────────────────
 
@@ -394,7 +474,12 @@ class MarketDataService:
         self._coingecko_url = "https://api.coingecko.com/api/v3"
         self.supported_coins = [
             "bitcoin", "ethereum", "binancecoin", "cardano",
-            "solana", "ripple", "polkadot", "dogecoin"
+            "solana", "ripple", "polkadot", "dogecoin",
+            # Volatile mid-caps — ideal for scalping
+            "avalanche-2", "chainlink", "near", "sui", "pepe",
+            "aptos", "arbitrum", "filecoin", "render-token",
+            "injective-protocol", "fetch-ai", "bonk", "floki",
+            "sei-network", "wif",
         ]
         self._cache: Dict[str, CacheEntry] = {}
         self._cg_rate_limiter = RateLimiter(max_calls=10, period=60)
@@ -738,6 +823,32 @@ class MarketDataService:
 
         logger.warning(f"Failed to fetch OHLC data for {coin} from any provider")
         return []
+
+    # ── OHLC by Interval (for scalping) ───────────────────────────────────
+
+    # Cache TTL per kline interval (shorter intervals = shorter cache)
+    _INTERVAL_CACHE_TTL = {
+        "1m": 30,     # 30 seconds
+        "3m": 60,     # 1 minute
+        "5m": 90,     # 1.5 minutes
+        "15m": 180,   # 3 minutes
+        "1h": 300,    # 5 minutes
+    }
+
+    def get_ohlc_interval(self, coin: str, interval: str = "1h", limit: int = 200) -> List[Dict]:
+        """Get OHLC data for a specific candle interval.
+        Used by scalping strategies that need exact timeframes (1m, 3m, 5m, 15m, 1h).
+        """
+        cache_key = f"ohlc_{coin}_{interval}_{limit}"
+        cached = self._get_cache(cache_key)
+        if cached:
+            return cached
+
+        ohlc = self._binance.get_ohlc_interval(coin, interval, limit)
+        if ohlc:
+            ttl = self._INTERVAL_CACHE_TTL.get(interval, 300)
+            self._set_cache(cache_key, ohlc, ttl)
+        return ohlc
 
     # ── Trending ──────────────────────────────────────────────────────────
 

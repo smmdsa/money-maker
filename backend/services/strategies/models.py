@@ -35,6 +35,8 @@ class StrategyConfig:
     risk_per_trade_pct: float # % of capital risked per trade
     min_confidence: float     # minimum confidence to open position
     trail_atr_mult: float = 2.5   # Chandelier exit: K × ATR for trailing distance
+    kline_interval: str = ""       # Binance kline interval for scalping (1m, 3m, 5m, 15m, 1h); empty = use default daily
+    scan_limit: int = 6            # how many coins to scan per cycle
 
 
 STRATEGIES: Dict[str, StrategyConfig] = {
@@ -89,8 +91,10 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_leverage=10,
         max_positions=5,
         risk_per_trade_pct=4.0,
-        min_confidence=0.50,
+        min_confidence=0.30,
         trail_atr_mult=2.5,
+        kline_interval="1h",
+        scan_limit=15,
     ),
     "scalper_1m": StrategyConfig(
         key="scalper_1m",
@@ -102,8 +106,10 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_leverage=20,
         max_positions=5,
         risk_per_trade_pct=2.0,
-        min_confidence=0.50,
+        min_confidence=0.25,
         trail_atr_mult=1.5,
+        kline_interval="1m",
+        scan_limit=15,
     ),
     "scalper_3m": StrategyConfig(
         key="scalper_3m",
@@ -115,8 +121,10 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_leverage=15,
         max_positions=5,
         risk_per_trade_pct=2.5,
-        min_confidence=0.50,
+        min_confidence=0.25,
         trail_atr_mult=1.8,
+        kline_interval="3m",
+        scan_limit=15,
     ),
     "scalper_5m": StrategyConfig(
         key="scalper_5m",
@@ -128,8 +136,10 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_leverage=12,
         max_positions=5,
         risk_per_trade_pct=3.0,
-        min_confidence=0.50,
+        min_confidence=0.25,
         trail_atr_mult=2.0,
+        kline_interval="5m",
+        scan_limit=15,
     ),
     "scalper_15m": StrategyConfig(
         key="scalper_15m",
@@ -141,8 +151,10 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         max_leverage=10,
         max_positions=5,
         risk_per_trade_pct=3.5,
-        min_confidence=0.50,
+        min_confidence=0.30,
         trail_atr_mult=2.2,
+        kline_interval="15m",
+        scan_limit=15,
     ),
     "grid_trader": StrategyConfig(
         key="grid_trader",

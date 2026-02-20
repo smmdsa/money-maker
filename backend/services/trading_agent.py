@@ -252,7 +252,7 @@ class TradingAgentService:
                 )
 
         # 4. Strategy-based close signal
-        indicators = self._compute_indicators(pos.cryptocurrency)
+        indicators = self._compute_indicators(pos.cryptocurrency, strategy_key)
         if indicators:
             signal = self.strategy_engine.evaluate(
                 strategy_key, indicators, current_price,
@@ -280,6 +280,7 @@ class TradingAgentService:
         existing_coins = {p.cryptocurrency for p in existing_positions}
         best_signal: Optional[Signal] = None
         best_coin: Optional[str] = None
+        strategy_cfg = STRATEGIES.get(strategy_key)
 
         # Get market activity for prioritization
         all_market = self.market_service.get_all_market_data()
@@ -300,8 +301,9 @@ class TradingAgentService:
                            if c not in existing_coins]
 
         # Evaluate top coins
-        for coin in coins_to_scan[:6]:
-            indicators = self._compute_indicators(coin)
+        scan_count = strategy_cfg.scan_limit if strategy_cfg else 6
+        for coin in coins_to_scan[:scan_count]:
+            indicators = self._compute_indicators(coin, strategy_key)
             if not indicators:
                 continue
 
@@ -332,8 +334,11 @@ class TradingAgentService:
 
     # ── Indicator Computation ─────────────────────────────────────────────
 
-    def _compute_indicators(self, coin: str) -> Optional[Dict]:
-        """Compute all technical indicators for a coin."""
+    def _compute_indicators(self, coin: str, strategy_key: str = "") -> Optional[Dict]:
+        """Compute all technical indicators for a coin.
+        For scalping strategies, uses the strategy-specific kline interval
+        instead of default daily candles.
+        """
         market_data = self.market_service.get_market_data(coin)
         if not market_data:
             return None
@@ -342,17 +347,26 @@ class TradingAgentService:
         if not current_price:
             return None
 
-        # Get OHLC data (need at least 55+ bars for EMA-55)
-        ohlc = self.market_service.get_ohlc(coin, days=90)
-        if not ohlc or len(ohlc) < 15:
-            ohlc = self.market_service.get_ohlc(coin, days=30)
+        # Determine OHLC source based on strategy
+        cfg = STRATEGIES.get(strategy_key)
+        kline_interval = cfg.kline_interval if cfg else ""
+
+        if kline_interval:
+            # Scalping: fetch candles at the exact interval needed
+            ohlc = self.market_service.get_ohlc_interval(coin, kline_interval, 200)
+        else:
+            # Non-scalping strategies: use daily candles
+            ohlc = self.market_service.get_ohlc(coin, days=90)
+            if not ohlc or len(ohlc) < 15:
+                ohlc = self.market_service.get_ohlc(coin, days=30)
 
         close_prices = [c["close"] for c in ohlc] if ohlc else []
 
         if len(close_prices) < 15:
-            historical = self.market_service.get_historical_prices(coin, days=30)
-            if historical:
-                close_prices = [h["price"] for h in historical]
+            if not kline_interval:
+                historical = self.market_service.get_historical_prices(coin, days=30)
+                if historical:
+                    close_prices = [h["price"] for h in historical]
 
         if len(close_prices) < 15:
             return None
@@ -394,7 +408,7 @@ class TradingAgentService:
             } for n in recent_news]
 
             # Gather indicators
-            indicators = self._compute_indicators(coin) or {}
+            indicators = self._compute_indicators(coin, strategy_key) or {}
 
             # Add market hours context to indicators for LLM
             if market_ctx:

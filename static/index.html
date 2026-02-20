@@ -288,6 +288,8 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 10px;
+            max-height: 400px;
+            overflow-y: auto;
         }
         
         .price-card {
@@ -474,7 +476,8 @@
             margin-top: 4px;
         }
 
-        /* Decision Detail Modal */
+        /* Decision Detail Modal — above other modals */
+        #decisionDetailModal { z-index: 1100; }
         .decision-modal-content {
             background: #1a1a2e;
             color: #e0e0e0;
@@ -558,6 +561,158 @@
             font-size: 0.9em;
             line-height: 1.6;
         }
+
+        /* Trade History Modal */
+        .th-modal-content {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 950px;
+            width: 95%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            border: 1px solid #2a2a4a;
+        }
+        .th-modal-content .close-btn {
+            color: #aaa;
+            position: absolute;
+            top: 12px;
+            right: 18px;
+            font-size: 1.6em;
+            z-index: 10;
+        }
+        .th-modal-content .close-btn:hover { color: #fff; }
+        .th-header {
+            margin-bottom: 18px;
+        }
+        .th-header h3 {
+            margin: 0 0 4px 0;
+            color: #fff;
+            font-size: 1.3em;
+        }
+        .th-header .th-subtitle {
+            font-size: 0.85em;
+            color: #888;
+        }
+        .th-filter-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            padding: 12px 14px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 8px;
+        }
+        .th-filter-bar select,
+        .th-filter-bar input[type="date"] {
+            background: #0d1b2a;
+            color: #e0e0e0;
+            border: 1px solid #3a3a5a;
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 0.88em;
+            outline: none;
+        }
+        .th-filter-bar select:focus,
+        .th-filter-bar input[type="date"]:focus {
+            border-color: #667eea;
+        }
+        .th-filter-bar input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(0.7);
+        }
+        .th-filter-bar label {
+            font-size: 0.8em;
+            color: #999;
+            margin-right: -6px;
+        }
+        .th-btn {
+            padding: 7px 14px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .th-btn-primary {
+            background: #667eea;
+            color: #fff;
+        }
+        .th-btn-primary:hover { background: #5a6fd6; }
+        .th-btn-secondary {
+            background: rgba(255,255,255,0.08);
+            color: #ccc;
+        }
+        .th-btn-secondary:hover { background: rgba(255,255,255,0.14); }
+        .th-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .th-summary-card {
+            padding: 12px 14px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 8px;
+            text-align: center;
+        }
+        .th-summary-card .th-stat-label {
+            font-size: 0.72em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .th-summary-card .th-stat-value {
+            font-size: 1.15em;
+            font-weight: 700;
+        }
+        .th-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88em;
+        }
+        .th-table thead th {
+            padding: 10px 8px;
+            text-align: left;
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            border-bottom: 1px solid #2a2a4a;
+            position: sticky;
+            top: 0;
+            background: #1a1a2e;
+        }
+        .th-table tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            transition: background 0.15s;
+        }
+        .th-table tbody tr:hover {
+            background: rgba(102,126,234,0.08);
+        }
+        .th-table tbody tr.clickable {
+            cursor: pointer;
+        }
+        .th-table td {
+            padding: 10px 8px;
+            vertical-align: middle;
+        }
+        .th-load-more {
+            text-align: center;
+            margin-top: 14px;
+        }
+        .th-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+            font-style: italic;
+        }
+        .th-badge-open { background: #1a237e; color: #82b1ff; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: 600; }
+        .th-badge-close { background: #4a148c; color: #ce93d8; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: 600; }
 
         /* News links */
         .news-link {
@@ -1317,6 +1472,49 @@
         </div>
     </div>
 
+    <!-- Trade History Modal -->
+    <div class="modal" id="tradeHistoryModal">
+        <div class="th-modal-content">
+            <span class="close-btn" onclick="hideTradeHistoryModal()">&times;</span>
+            <div class="th-header">
+                <h3>📜 Trade History</h3>
+                <div class="th-subtitle" id="thSubtitle"></div>
+            </div>
+            <div class="th-filter-bar">
+                <label>Token</label>
+                <select id="thFilterToken"><option value="">All Tokens</option></select>
+                <label>From</label>
+                <input type="date" id="thFilterFrom">
+                <label>To</label>
+                <input type="date" id="thFilterTo">
+                <button class="th-btn th-btn-primary" onclick="filterTradeHistory()">Filter</button>
+                <button class="th-btn th-btn-secondary" onclick="clearTradeFilters()">Clear</button>
+            </div>
+            <div id="thSummary" class="th-summary"></div>
+            <div id="thTableWrap">
+                <table class="th-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Token</th>
+                            <th>Type</th>
+                            <th>Lev</th>
+                            <th>Price</th>
+                            <th>Margin</th>
+                            <th>Size</th>
+                            <th>P/L</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="thTableBody"></tbody>
+                </table>
+            </div>
+            <div id="thLoadMore" class="th-load-more" style="display:none;">
+                <button class="th-btn th-btn-secondary" onclick="loadMoreTradeHistory()">Load More</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Create Agent Modal -->
     <div class="modal" id="createAgentModal">
         <div class="modal-content" style="max-width: 640px;">
@@ -1549,6 +1747,7 @@
                         ${agent.portfolio.length > 0
                             ? `<p style="margin-top: 15px; color: #667eea; font-weight: 600;">📊 ${agent.portfolio.length} open position${agent.portfolio.length > 1 ? 's' : ''} — see below</p>`
                             : '<p style="margin-top: 15px; color: #999;">No open positions</p>'}
+                        <button class="btn" style="margin-top:10px;" onclick="showTradeHistoryModal(${agent.id}, '${agent.name.replace(/'/g, "\\'")}', '${(agent.strategy || 'default').replace(/_/g, ' ')}')">📜 Trade History</button>
                     </div>
                 `;
                 
@@ -1697,11 +1896,12 @@
         async function loadTrades(agentId) {
             try {
                 const response = await fetch(`/api/agents/${agentId}/trades?limit=20`);
-                const trades = await response.json();
+                const data = await response.json();
+                const trades = data.trades || data;
                 
                 const tradeLog = document.getElementById('tradeLog');
                 
-                if (trades.length === 0) {
+                if (!trades || trades.length === 0) {
                     tradeLog.innerHTML = '<div class="empty">No trades yet</div>';
                     return;
                 }
@@ -2119,6 +2319,154 @@
         // Close decision modal on backdrop click
         document.getElementById('decisionDetailModal')?.addEventListener('click', function(e) {
             if (e.target === this) hideDecisionModal();
+        });
+
+        // ── Trade History Modal ──────────────────────────────────────
+        let thCurrentAgentId = null;
+        let thCurrentOffset = 0;
+        const TH_PAGE_SIZE = 50;
+
+        async function showTradeHistoryModal(agentId, agentName, strategyName) {
+            thCurrentAgentId = agentId;
+            thCurrentOffset = 0;
+            document.getElementById('thSubtitle').textContent = `${agentName} — ${strategyName}`;
+            document.getElementById('tradeHistoryModal').classList.add('active');
+
+            // Reset filters
+            document.getElementById('thFilterToken').value = '';
+            document.getElementById('thFilterFrom').value = '';
+            document.getElementById('thFilterTo').value = '';
+
+            // Load tokens dropdown
+            try {
+                const resp = await fetch(`/api/agents/${agentId}/traded-tokens`);
+                const tokens = await resp.json();
+                const sel = document.getElementById('thFilterToken');
+                sel.innerHTML = '<option value="">All Tokens</option>' +
+                    tokens.map(t => `<option value="${t}">${t}</option>`).join('');
+            } catch (e) { console.error('Error loading tokens:', e); }
+
+            // Load trades
+            await loadTradeHistory(false);
+        }
+
+        async function loadTradeHistory(append) {
+            if (!thCurrentAgentId) return;
+            const symbol = document.getElementById('thFilterToken').value;
+            const fromDate = document.getElementById('thFilterFrom').value;
+            const toDate = document.getElementById('thFilterTo').value;
+
+            let url = `/api/agents/${thCurrentAgentId}/trades?limit=${TH_PAGE_SIZE}&offset=${thCurrentOffset}`;
+            if (symbol) url += `&symbol=${encodeURIComponent(symbol)}`;
+            if (fromDate) url += `&from_date=${fromDate}`;
+            if (toDate) url += `&to_date=${toDate}`;
+
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                const trades = data.trades;
+                const summary = data.summary;
+
+                // Render summary
+                if (!append) {
+                    const winRate = summary.total_trades > 0
+                        ? ((summary.winning_trades / (summary.winning_trades + summary.losing_trades || 1)) * 100).toFixed(1)
+                        : '0.0';
+                    const pnlClass = summary.total_pnl >= 0 ? 'profit' : 'loss';
+                    const pnlSign = summary.total_pnl >= 0 ? '+' : '';
+                    document.getElementById('thSummary').innerHTML = `
+                        <div class="th-summary-card">
+                            <div class="th-stat-label">Total P/L</div>
+                            <div class="th-stat-value ${pnlClass}">${pnlSign}$${summary.total_pnl.toFixed(2)}</div>
+                        </div>
+                        <div class="th-summary-card">
+                            <div class="th-stat-label">Total Trades</div>
+                            <div class="th-stat-value">${summary.total_trades}</div>
+                        </div>
+                        <div class="th-summary-card">
+                            <div class="th-stat-label">Winning</div>
+                            <div class="th-stat-value" style="color:#4caf50;">${summary.winning_trades}</div>
+                        </div>
+                        <div class="th-summary-card">
+                            <div class="th-stat-label">Losing</div>
+                            <div class="th-stat-value" style="color:#ff5252;">${summary.losing_trades}</div>
+                        </div>
+                        <div class="th-summary-card">
+                            <div class="th-stat-label">Win Rate</div>
+                            <div class="th-stat-value">${winRate}%</div>
+                        </div>
+                    `;
+                }
+
+                // Render table rows
+                const tbody = document.getElementById('thTableBody');
+                if (!append) tbody.innerHTML = '';
+
+                if (trades.length === 0 && !append) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="th-empty">No trades found</td></tr>';
+                    document.getElementById('thLoadMore').style.display = 'none';
+                    return;
+                }
+
+                const rows = trades.map(t => {
+                    const isOpen = t.trade_type.startsWith('open_');
+                    const isLong = t.trade_type.includes('long');
+                    const typeBadge = isLong ? 'badge-long' : 'badge-short';
+                    const actionBadge = isOpen ? 'th-badge-open' : 'th-badge-close';
+                    const pnlClass = t.profit_loss > 0 ? 'profit' : t.profit_loss < 0 ? 'loss' : '';
+                    const pnlSign = t.profit_loss > 0 ? '+' : '';
+                    const hasDecision = t.decision_id != null;
+                    return `
+                    <tr class="${hasDecision ? 'clickable' : ''}" ${hasDecision ? `onclick="showDecisionModal(${t.decision_id})"` : ''}>
+                        <td>${new Date(t.timestamp).toLocaleString()}</td>
+                        <td><strong>${t.symbol}</strong></td>
+                        <td><span class="${typeBadge}">${isLong ? 'LONG' : 'SHORT'}</span> <span class="${actionBadge}">${isOpen ? 'OPEN' : 'CLOSE'}</span></td>
+                        <td>${t.leverage}x</td>
+                        <td>$${fmtPrice(t.price)}</td>
+                        <td>$${t.margin.toFixed(2)}</td>
+                        <td>$${t.total_value.toFixed(2)}</td>
+                        <td class="${pnlClass}">${t.profit_loss !== 0 ? pnlSign + '$' + t.profit_loss.toFixed(2) : '—'}</td>
+                        <td>${hasDecision ? '<span style="font-size:0.8em;color:#667eea;">🔍</span>' : ''}</td>
+                    </tr>`;
+                }).join('');
+                tbody.innerHTML += rows;
+
+                // Show/hide load more
+                const loaded = thCurrentOffset + trades.length;
+                document.getElementById('thLoadMore').style.display =
+                    loaded < data.total ? '' : 'none';
+            } catch (err) {
+                console.error('Error loading trade history:', err);
+                document.getElementById('thTableBody').innerHTML =
+                    '<tr><td colspan="9" class="th-empty" style="color:#ff5252;">Error loading trades</td></tr>';
+            }
+        }
+
+        function filterTradeHistory() {
+            thCurrentOffset = 0;
+            loadTradeHistory(false);
+        }
+
+        function clearTradeFilters() {
+            document.getElementById('thFilterToken').value = '';
+            document.getElementById('thFilterFrom').value = '';
+            document.getElementById('thFilterTo').value = '';
+            thCurrentOffset = 0;
+            loadTradeHistory(false);
+        }
+
+        function loadMoreTradeHistory() {
+            thCurrentOffset += TH_PAGE_SIZE;
+            loadTradeHistory(true);
+        }
+
+        function hideTradeHistoryModal() {
+            document.getElementById('tradeHistoryModal').classList.remove('active');
+        }
+
+        // Close trade history modal on backdrop click
+        document.getElementById('tradeHistoryModal')?.addEventListener('click', function(e) {
+            if (e.target === this) hideTradeHistoryModal();
         });
 
         // Load strategies for the create agent modal

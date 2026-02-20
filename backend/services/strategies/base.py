@@ -115,8 +115,9 @@ class BaseStrategy:
     ) -> Signal:
         """Convert raw scores into a Signal object."""
         max_score = max(long_score, short_score)
-        min_score_to_act = 3
-        confidence = min(max_score / 10.0, 0.95)
+        # Scalping uses lower threshold for more frequent trades
+        min_score_to_act = 2 if cfg.style == "scalping" else 3
+        confidence = min(max_score / 8.0 if cfg.style == "scalping" else max_score / 10.0, 0.95)
         reasoning_str = "; ".join(reasons) if reasons else "No clear signals"
 
         # Scale leverage with confidence
