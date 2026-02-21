@@ -351,6 +351,46 @@ class Indicators:
             "avg_volume": avg_recent,
         }
 
+    # ── Order Flow Imbalance (OHLCV proxy) ──────────────────────────────
+
+    @staticmethod
+    def ofi(ohlc: List[Dict], period: int = 10) -> Optional[Dict]:
+        """Order Flow Imbalance proxy from OHLCV data.
+
+        Uses volume delta: bullish candles (close > open) contribute +volume,
+        bearish candles contribute -volume.  Returns normalised OFI ratio
+        (-1 to +1) and a directional bias.
+        """
+        if len(ohlc) < period:
+            return None
+
+        recent = ohlc[-period:]
+        total_vol = 0.0
+        delta = 0.0
+        for bar in recent:
+            v = bar.get("volume", 0)
+            o = bar.get("open", 0)
+            c = bar.get("close", 0)
+            total_vol += v
+            if c > o:
+                delta += v       # buying pressure
+            elif c < o:
+                delta -= v       # selling pressure
+            # doji (c == o) contributes 0
+
+        if total_vol <= 0:
+            return {"ratio": 0.0, "bias": "neutral", "delta": 0.0}
+
+        ratio = delta / total_vol          # -1.0 .. +1.0
+        if ratio > 0.3:
+            bias = "bullish"
+        elif ratio < -0.3:
+            bias = "bearish"
+        else:
+            bias = "neutral"
+
+        return {"ratio": ratio, "bias": bias, "delta": delta}
+
     # ── EMA Slope (rate of change) ──────────────────────────────────────
 
     @staticmethod
@@ -577,5 +617,9 @@ class Indicators:
             result["momentum"] = (current_price - avg_fast) / avg_fast * 100
         else:
             result["momentum"] = 0.0
+
+        # ── Order Flow Imbalance ────────────────────
+        ofi_period = p.get("ofi_period", 10)
+        result["ofi"] = Indicators.ofi(ohlc, ofi_period)
 
         return result

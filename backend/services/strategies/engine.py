@@ -10,7 +10,7 @@ from backend.services.strategies.models import STRATEGIES, Signal, StrategyConfi
 from backend.services.strategies.trend_rider import TrendRiderStrategy
 from backend.services.strategies.mean_reversion import MeanReversionStrategy
 from backend.services.strategies.momentum_sniper import MomentumSniperStrategy
-from backend.services.strategies.scalper import ScalperStrategy
+from backend.services.strategies.scalper import ScalperFactory
 from backend.services.strategies.grid_trader import GridTraderStrategy
 from backend.services.strategies.confluence_master import ConfluenceMasterStrategy
 
@@ -25,11 +25,11 @@ class StrategyEngine:
             "trend_rider": TrendRiderStrategy(),
             "mean_reversion": MeanReversionStrategy(),
             "momentum_sniper": MomentumSniperStrategy(),
-            "scalper": ScalperStrategy("scalper"),
-            "scalper_1m": ScalperStrategy("scalper_1m"),
-            "scalper_3m": ScalperStrategy("scalper_3m"),
-            "scalper_5m": ScalperStrategy("scalper_5m"),
-            "scalper_15m": ScalperStrategy("scalper_15m"),
+            "scalper": ScalperFactory.create("scalper"),
+            "scalper_1m": ScalperFactory.create("scalper_1m"),
+            "scalper_3m": ScalperFactory.create("scalper_3m"),
+            "scalper_5m": ScalperFactory.create("scalper_5m"),
+            "scalper_15m": ScalperFactory.create("scalper_15m"),
             "grid_trader": GridTraderStrategy(),
             "confluence_master": ConfluenceMasterStrategy(),
         }

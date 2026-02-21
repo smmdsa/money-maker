@@ -58,6 +58,9 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         "disable_squeeze_score": True,
         "squeeze_requires_volume": True,
         "disable_trailing": True,
+        # OFI defensive only, no EMA slope bonus (bonuses break scalpers)
+        "ofi_against_penalty": 2,
+        "ema_slope_bonus": 0,
         # 120 × 1m = 2hr cooldown after SL
         "cooldown_candles": 120,
         # MTF — defensive only
@@ -94,6 +97,9 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         "disable_squeeze_score": True,
         "squeeze_requires_volume": True,
         "disable_trailing": True,
+        # OFI defensive only, no EMA slope bonus
+        "ofi_against_penalty": 1,
+        "ema_slope_bonus": 0,
         # 40 × 3m = 2hr cooldown after SL
         "cooldown_candles": 40,
         # MTF — defensive
@@ -123,11 +129,15 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         # ── Filters ─────────────────────────────────────────────────
         "counter_trend_penalty": 1,
         "require_volume": False,
+        # Hard ADX: 5m works best with hard gate (proven in V2)
         "require_adx_trending": True,
         "leading_conflict_penalty": 4,
         "disable_squeeze_score": True,
         "squeeze_requires_volume": True,
         "disable_trailing": True,
+        # OFI defensive only, no EMA slope bonus
+        "ofi_against_penalty": 1,
+        "ema_slope_bonus": 0,
         # 20 × 5m = 100 min cooldown after SL
         "cooldown_candles": 20,
         # MTF — defensive
@@ -172,6 +182,9 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         # BB squeeze bonus only with volume confirmation (if enabled)
         "squeeze_requires_volume": True,
         "disable_trailing": True,
+        # OFI + EMA slope DISABLED for 15m — bonuses break the golden config
+        "ofi_against_penalty": 0,
+        "ema_slope_bonus": 0,
         # 10 × 15m = 150 min cooldown after SL
         "cooldown_candles": 10,
         # MTF — disabled: 15m's native filters (ADX gate, leading conflict,
@@ -183,9 +196,9 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         "mtf_sr_penalty": 0,
         "mtf_require_trend": False,
     },
-    "scalper": {  # 1h — soft ADX dampen instead of hard gate
+    "scalper": {  # 1h — soft ADX dampen + OFI + slope
         # ── Entry quality ───────────────────────────────────────────
-        "min_score": 5,
+        "min_score": 6,
         "conf_divisor": 12.0,
         "min_score_margin": 3,
         "ema_spread_threshold": 0.12,
@@ -198,20 +211,23 @@ TIMEFRAME_PARAMS: Dict[str, Dict] = {
         "bb_extreme_low": 0.08, "bb_extreme_high": 0.92,
         "momentum_threshold": 0.35,
         # ── Risk management (wider stops for 1h) ───────────────────
-        "sl_atr_mult": 1.4, "tp_atr_mult": 3.5,
-        "sl_min_pct": 0.60, "tp_min_rr": 2.3,
+        "sl_atr_mult": 1.6, "tp_atr_mult": 4.0,
+        "sl_min_pct": 0.65, "tp_min_rr": 2.3,
         # ── Filters ─────────────────────────────────────────────────
         "counter_trend_penalty": 1,
         "require_volume": False,
         # Soft ADX: penalise non-trending instead of blocking
         "require_adx_trending": False,
-        "adx_soft_dampen": 2,           # subtract 2 when ADX < 25
+        "adx_soft_dampen": 3,           # subtract 3 when ADX < 25
         "leading_conflict_penalty": 3,
         "disable_squeeze_score": True,
         "squeeze_requires_volume": True,
         "disable_trailing": True,
-        # 3 × 1h = 3 hours after SL
-        "cooldown_candles": 3,
+        # OFI defensive only + slope bonus (1h EMA slope is meaningful)
+        "ofi_against_penalty": 1,
+        "ema_slope_bonus": 1,
+        # 4 × 1h = 4 hours after SL (was 3, increase to avoid revenge trades)
+        "cooldown_candles": 4,
         # MTF — defensive
         "mtf_trend_bonus": 0,
         "mtf_against_penalty": 1,
@@ -495,6 +511,38 @@ class ScalperStrategy(BaseStrategy):
             long_score = max(0, long_score - dampen)
             short_score = max(0, short_score - dampen)
             reasons.append(f"ADX low ({adx_data.get('adx', 0):.0f}) — scores dampened by {dampen}")
+
+        # ══════════════════════════════════════════════════════════════════
+        # OFI FILTER: Order Flow Imbalance — penalise entries against flow
+        # Uses volume delta as proxy: bullish candles (+vol), bearish (-vol)
+        # ══════════════════════════════════════════════════════════════════
+        ofi_data = ind.get("ofi")
+        ofi_penalty = p.get("ofi_against_penalty", 1)
+        if ofi_data and ofi_penalty > 0:
+            ofi_ratio = ofi_data.get("ratio", 0)
+            # Long entry with bearish order flow → penalise
+            if long_score > 0 and ofi_ratio < -0.3:
+                long_score = max(0, long_score - ofi_penalty)
+                reasons.append(f"OFI bearish ({ofi_ratio:.2f}) — long dampened -{ofi_penalty}")
+            # Short entry with bullish order flow → penalise
+            if short_score > 0 and ofi_ratio > 0.3:
+                short_score = max(0, short_score - ofi_penalty)
+                reasons.append(f"OFI bullish ({ofi_ratio:.2f}) — short dampened -{ofi_penalty}")
+
+        # ══════════════════════════════════════════════════════════════════
+        # EMA SLOPE CONFLUENCE: Reward entries aligned with EMA21 momentum
+        # If EMA21 is accelerating in entry direction → +1 conviction
+        # ══════════════════════════════════════════════════════════════════
+        ema21_slope = ind.get("ema21_slope")
+        slope_bonus = p.get("ema_slope_bonus", 1)
+        if ema21_slope is not None and slope_bonus > 0:
+            slope_thresh = 0.05  # 0.05% slope = meaningful trend velocity
+            if ema21_slope > slope_thresh and long_score > short_score:
+                long_score += slope_bonus
+                reasons.append(f"EMA21 slope up ({ema21_slope:.2f}%) — long +{slope_bonus}")
+            elif ema21_slope < -slope_thresh and short_score > long_score:
+                short_score += slope_bonus
+                reasons.append(f"EMA21 slope down ({ema21_slope:.2f}%) — short +{slope_bonus}")
 
         # ══════════════════════════════════════════════════════════════════
         # LAYER MTF: Higher-Timeframe Trend Alignment + S/R Proximity
