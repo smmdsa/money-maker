@@ -100,6 +100,14 @@ class AgentCreate(BaseModel):
 
 class AgentUpdate(BaseModel):
     status: Optional[str] = None
+    name: Optional[str] = None
+    strategy: Optional[str] = None
+    max_leverage: Optional[int] = None
+    min_leverage: Optional[int] = None
+    risk_pct_min: Optional[float] = None
+    risk_pct_max: Optional[float] = None
+    trailing_enabled: Optional[bool] = None
+    allowed_symbols: Optional[List[str]] = None
 
 
 # ── Lifespan (replaces deprecated @app.on_event) ───────────────────────
@@ -218,6 +226,7 @@ def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
         "risk_pct_min": new_agent.risk_pct_min,
         "risk_pct_max": new_agent.risk_pct_max,
         "trailing_enabled": getattr(new_agent, 'trailing_enabled', True),
+        "allowed_symbols": getattr(new_agent, 'allowed_symbols', None),
         "created_at": new_agent.created_at.isoformat()
     }
 
@@ -343,6 +352,7 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         "risk_pct_min": getattr(agent, 'risk_pct_min', 0),
         "risk_pct_max": getattr(agent, 'risk_pct_max', 0),
         "trailing_enabled": getattr(agent, 'trailing_enabled', True),
+        "allowed_symbols": getattr(agent, 'allowed_symbols', None),
         "portfolio": portfolio_items,
         "created_at": agent.created_at.isoformat()
     }
@@ -398,24 +408,59 @@ def close_all_positions(agent_id: int, db: Session = Depends(get_db)):
 
 @app.patch("/api/agents/{agent_id}")
 def update_agent(agent_id: int, update: AgentUpdate, db: Session = Depends(get_db)):
-    """Update agent status (pause/resume/stop)"""
+    """Update agent settings (status, strategy, leverage, risk, tokens, etc.)"""
     agent = db.query(TradingAgent).filter(TradingAgent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    
-    if update.status:
+
+    if update.status is not None:
         if update.status not in ["active", "paused", "stopped"]:
             raise HTTPException(status_code=400, detail="Invalid status")
         agent.status = update.status
-        agent.updated_at = datetime.utcnow()
-    
+
+    if update.name is not None:
+        existing = db.query(TradingAgent).filter(
+            TradingAgent.name == update.name, TradingAgent.id != agent_id
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Agent name already exists")
+        agent.name = update.name
+
+    if update.strategy is not None:
+        if update.strategy not in STRATEGIES:
+            raise HTTPException(status_code=400, detail=f"Unknown strategy: {update.strategy}")
+        agent.strategy = update.strategy
+
+    if update.max_leverage is not None:
+        if update.max_leverage < 1 or update.max_leverage > 125:
+            raise HTTPException(status_code=400, detail="Max leverage must be 1-125")
+        agent.max_leverage = update.max_leverage
+
+    if update.min_leverage is not None:
+        if update.min_leverage < 1:
+            raise HTTPException(status_code=400, detail="Min leverage must be >= 1")
+        agent.min_leverage = update.min_leverage
+
+    if update.risk_pct_min is not None:
+        agent.risk_pct_min = update.risk_pct_min
+
+    if update.risk_pct_max is not None:
+        agent.risk_pct_max = update.risk_pct_max
+
+    if update.trailing_enabled is not None:
+        agent.trailing_enabled = update.trailing_enabled
+
+    if update.allowed_symbols is not None:
+        agent.allowed_symbols = update.allowed_symbols if update.allowed_symbols else None
+
+    agent.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(agent)
-    
-    # Agent status change may affect reactive watchlist (paused/stopped agents excluded)
-    if reactive_monitor and update.status:
+
+    # Agent status/settings change may affect reactive watchlist
+    if reactive_monitor:
         reactive_monitor.refresh()
-    
+
     return {"message": "Agent updated successfully", "status": agent.status}
 
 
@@ -559,6 +604,22 @@ def get_agent_decisions(agent_id: int, limit: int = 50, db: Session = Depends(ge
         "strategy": d.strategy,
         "timestamp": d.timestamp.isoformat()
     } for d in decisions]
+
+
+@app.get("/api/supported-coins")
+def get_supported_coins():
+    """Get list of all supported coins with their symbols"""
+    from backend.services.market_data import BinanceProvider
+    result = []
+    for coin_id in market_service.supported_coins:
+        sym = BinanceProvider.SYMBOL_MAP.get(coin_id, "")
+        ticker = sym.replace("USDT", "").replace("1000", "") if sym else coin_id[:3].upper()
+        result.append({
+            "id": coin_id,
+            "symbol": ticker,
+            "name": coin_id.replace("-", " ").replace("2", "").title().strip(),
+        })
+    return result
 
 
 @app.get("/api/market/prices")

@@ -283,6 +283,9 @@ class TradingAgentService:
         best_coin: Optional[str] = None
         strategy_cfg = STRATEGIES.get(strategy_key)
 
+        # Per-agent token whitelist (None = trade all supported coins)
+        allowed = set(getattr(agent, 'allowed_symbols', None) or [])
+
         # Get market activity for prioritization
         all_market = self.market_service.get_all_market_data()
         coins_to_scan = []
@@ -293,13 +296,16 @@ class TradingAgentService:
                 coin_id = coin.get("id", "")
                 if coin_id in existing_coins:
                     continue
+                if allowed and coin_id not in allowed:
+                    continue
                 change = abs(coin.get("price_change_24h") or 0)
                 scored.append((coin_id, change))
             scored.sort(key=lambda x: x[1], reverse=True)
             coins_to_scan = [c[0] for c in scored]
         else:
             coins_to_scan = [c for c in self.market_service.supported_coins
-                           if c not in existing_coins]
+                           if c not in existing_coins
+                           and (not allowed or c in allowed)]
 
         # Evaluate top coins
         scan_count = strategy_cfg.scan_limit if strategy_cfg else 6

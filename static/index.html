@@ -309,6 +309,107 @@
             font-size: 0.85em;
             margin: 2px;
         }
+
+        .btn-edit-agent {
+            background: none;
+            border: 1px solid var(--border-light);
+            border-radius: 6px;
+            padding: 5px 8px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-edit-agent:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+            background: var(--accent-light);
+        }
+
+        /* ── Edit Agent Modal Tabs ─── */
+        .edit-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--border-light);
+            margin-bottom: 16px;
+        }
+        .edit-tab-btn {
+            flex: 1;
+            padding: 10px 12px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 0.92em;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+        .edit-tab-btn.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        .edit-tab-btn:hover:not(.active) {
+            color: var(--text-primary);
+        }
+        .edit-tab-panel { display: none; }
+        .edit-tab-panel.active { display: block; }
+
+        /* Token checklist */
+        .token-list {
+            max-height: 340px;
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+        }
+        .token-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s;
+            font-size: 0.88em;
+        }
+        .token-item:hover {
+            background: var(--bg-card-hover);
+        }
+        .token-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+        }
+        .token-item .token-symbol {
+            font-weight: 700;
+            min-width: 50px;
+        }
+        .token-item .token-name {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+        }
+        .token-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .token-actions button {
+            background: none;
+            border: 1px solid var(--border-light);
+            border-radius: 4px;
+            padding: 4px 10px;
+            cursor: pointer;
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+        .token-actions button:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
         
         .form-group {
             margin-bottom: 15px;
@@ -2580,6 +2681,90 @@ ws.onmessage = (e) => {
             </form>
         </div>
     </div>
+
+    <!-- Edit Agent Modal -->
+    <div class="modal" id="editAgentModal">
+        <div class="modal-content" style="max-width: 640px;">
+            <span class="close-btn" onclick="hideEditAgentModal()">&times;</span>
+            <h2 style="margin-bottom:12px;">✏️ Edit Agent</h2>
+            <input type="hidden" id="editAgentId">
+
+            <!-- Tabs -->
+            <div class="edit-tabs">
+                <button class="edit-tab-btn active" onclick="switchEditTab('settings', this)">⚙️ Settings</button>
+                <button class="edit-tab-btn" onclick="switchEditTab('tokens', this)">🪙 Tokens</button>
+            </div>
+
+            <!-- Tab 1: Settings -->
+            <div class="edit-tab-panel active" id="editTabSettings">
+                <div class="form-group">
+                    <label>Agent Name</label>
+                    <input type="text" id="editAgentName" required placeholder="My Trading Bot">
+                </div>
+
+                <div class="form-group">
+                    <label>Trading Strategy</label>
+                    <div id="editStrategyList" style="max-height:200px;overflow-y:auto;">Loading strategies...</div>
+                    <input type="hidden" id="editSelectedStrategy" value="">
+                </div>
+
+                <!-- Leverage Range -->
+                <div class="form-group">
+                    <label>Leverage Range</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Min</span>
+                        <input type="range" id="editMinLeverage" min="1" max="50" value="1" style="flex:1"
+                               oninput="syncEditLeverageSliders()">
+                        <span id="editMinLevLabel" style="font-weight:700;min-width:40px;">1x</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Max</span>
+                        <input type="range" id="editMaxLeverage" min="1" max="50" value="10" style="flex:1"
+                               oninput="syncEditLeverageSliders()">
+                        <span id="editLeverageLabel" style="font-weight:700;min-width:40px;">10x</span>
+                    </div>
+                </div>
+
+                <!-- Risk % Range -->
+                <div class="form-group">
+                    <label>Risk per Trade (%)</label>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Min</span>
+                        <input type="range" id="editRiskMin" min="0" max="20" value="0" step="0.5" style="flex:1"
+                               oninput="syncEditRiskSliders()">
+                        <span id="editRiskMinLabel" style="font-weight:700;min-width:55px;">Auto</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Max</span>
+                        <input type="range" id="editRiskMax" min="0" max="20" value="0" step="0.5" style="flex:1"
+                               oninput="syncEditRiskSliders()">
+                        <span id="editRiskMaxLabel" style="font-weight:700;min-width:55px;">Auto</span>
+                    </div>
+                    <div style="margin-top:4px;font-size:0.75em;color:var(--text-tertiary);">0 = use strategy default.</div>
+                </div>
+
+                <!-- Trailing Stop -->
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="editTrailingEnabled" checked style="width:18px;height:18px;accent-color:#667eea;">
+                        <span>Enable Trailing Stop Loss</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Tab 2: Tokens -->
+            <div class="edit-tab-panel" id="editTabTokens">
+                <p style="font-size:0.85em;color:var(--text-secondary);margin-bottom:10px;">Select which tokens this agent is allowed to trade. Uncheck all to allow all tokens.</p>
+                <div class="token-actions">
+                    <button onclick="editTokenSelectAll()">Select All</button>
+                    <button onclick="editTokenDeselectAll()">Deselect All</button>
+                </div>
+                <div class="token-list" id="editTokenList">Loading tokens...</div>
+            </div>
+
+            <button class="btn" style="width:100%;margin-top:16px;" onclick="saveAgentEdit()">💾 Save Changes</button>
+        </div>
+    </div>
     
     <!-- TradingView Lightweight Charts -->
     <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
@@ -2803,7 +2988,12 @@ ws.onmessage = (e) => {
                 
                 const detailsHtml = `
                     <div>
-                        <h3>${agent.name}</h3>
+                        <div style="display:flex;align-items:center;justify-content:space-between;">
+                            <h3>${agent.name}</h3>
+                            <button class="btn-edit-agent" onclick="showEditAgentModal(${agent.id})" title="Edit Agent">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11.498 2.064a1.75 1.75 0 0 1 2.476 0l.96.96a1.75 1.75 0 0 1 0 2.476l-7.5 7.5a1.75 1.75 0 0 1-.834.462l-3.109.777a.75.75 0 0 1-.91-.91l.778-3.11a1.75 1.75 0 0 1 .462-.833l7.677-7.322zm1.416 1.06a.25.25 0 0 0-.354 0L5.083 10.6a.25.25 0 0 0-.066.12l-.507 2.027 2.027-.507a.25.25 0 0 0 .12-.066l7.477-7.477a.25.25 0 0 0 0-.354l-.96-.96z"/></svg>
+                            </button>
+                        </div>
                         <p><strong>Status:</strong> <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span></p>
                         <p><strong>Strategy:</strong> <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
                            <span class="badge-leverage">${(agent.min_leverage || 1)}x–${agent.max_leverage}x</span>
@@ -4039,6 +4229,165 @@ ws.onmessage = (e) => {
         
         function hideCreateAgentModal() {
             document.getElementById('createAgentModal').classList.remove('active');
+        }
+
+        // ══════════════ EDIT AGENT MODAL ═══════════════════════════════
+        let _editSupportedCoins = [];  // cached from /api/supported-coins
+
+        function switchEditTab(tab, btn) {
+            document.querySelectorAll('.edit-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.edit-tab-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById(tab === 'settings' ? 'editTabSettings' : 'editTabTokens').classList.add('active');
+        }
+
+        function syncEditLeverageSliders() {
+            const minV = parseInt(document.getElementById('editMinLeverage').value);
+            const maxV = parseInt(document.getElementById('editMaxLeverage').value);
+            if (minV > maxV) document.getElementById('editMinLeverage').value = maxV;
+            document.getElementById('editMinLevLabel').textContent = document.getElementById('editMinLeverage').value + 'x';
+            document.getElementById('editLeverageLabel').textContent = maxV + 'x';
+        }
+
+        function syncEditRiskSliders() {
+            const minV = parseFloat(document.getElementById('editRiskMin').value);
+            const maxV = parseFloat(document.getElementById('editRiskMax').value);
+            if (minV > maxV && maxV > 0) document.getElementById('editRiskMin').value = maxV;
+            document.getElementById('editRiskMinLabel').textContent = parseFloat(document.getElementById('editRiskMin').value) === 0 ? 'Auto' : document.getElementById('editRiskMin').value + '%';
+            document.getElementById('editRiskMaxLabel').textContent = maxV === 0 ? 'Auto' : maxV + '%';
+        }
+
+        function editTokenSelectAll() {
+            document.querySelectorAll('#editTokenList input[type="checkbox"]').forEach(cb => cb.checked = true);
+        }
+        function editTokenDeselectAll() {
+            document.querySelectorAll('#editTokenList input[type="checkbox"]').forEach(cb => cb.checked = false);
+        }
+
+        async function showEditAgentModal(agentId) {
+            // Fetch agent data
+            const resp = await fetch(`/api/agents/${agentId}`);
+            const agent = await resp.json();
+
+            document.getElementById('editAgentId').value = agentId;
+            document.getElementById('editAgentName').value = agent.name;
+            document.getElementById('editMinLeverage').value = agent.min_leverage || 1;
+            document.getElementById('editMaxLeverage').value = agent.max_leverage || 10;
+            document.getElementById('editRiskMin').value = agent.risk_pct_min || 0;
+            document.getElementById('editRiskMax').value = agent.risk_pct_max || 0;
+            document.getElementById('editTrailingEnabled').checked = agent.trailing_enabled !== false;
+            document.getElementById('editSelectedStrategy').value = agent.strategy || 'confluence_master';
+            syncEditLeverageSliders();
+            syncEditRiskSliders();
+
+            // Load strategies
+            try {
+                const sResp = await fetch('/api/strategies');
+                const strategies = await sResp.json();
+                const container = document.getElementById('editStrategyList');
+                const sel = agent.strategy || 'confluence_master';
+                container.innerHTML = Object.values(strategies).map(s => `
+                    <div class="strategy-card ${s.key === sel ? 'selected' : ''}"
+                         onclick="selectEditStrategy('${s.key}', this)">
+                        <h4>${s.name}</h4>
+                        <p>${s.description}</p>
+                        <div class="strategy-meta">
+                            Leverage: ${s.default_leverage}-${s.max_leverage}x |
+                            Max Positions: ${s.max_positions} |
+                            Risk/Trade: ${s.risk_per_trade_pct}%
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) { console.error('Error loading strategies for edit:', e); }
+
+            // Load tokens
+            try {
+                if (_editSupportedCoins.length === 0) {
+                    const tResp = await fetch('/api/supported-coins');
+                    _editSupportedCoins = await tResp.json();
+                }
+                const allowed = agent.allowed_symbols || [];
+                const allChecked = allowed.length === 0;
+                const container = document.getElementById('editTokenList');
+                container.innerHTML = _editSupportedCoins.map(c => `
+                    <label class="token-item">
+                        <input type="checkbox" value="${c.id}" ${allChecked || allowed.includes(c.id) ? 'checked' : ''}>
+                        <span class="token-symbol">${c.symbol}</span>
+                        <span class="token-name">${c.name}</span>
+                    </label>
+                `).join('');
+            } catch (e) { console.error('Error loading tokens for edit:', e); }
+
+            // Reset to settings tab
+            document.querySelector('.edit-tab-btn').click();
+            document.getElementById('editAgentModal').classList.add('active');
+        }
+
+        function selectEditStrategy(key, el) {
+            document.getElementById('editSelectedStrategy').value = key;
+            document.querySelectorAll('#editStrategyList .strategy-card').forEach(c => c.classList.remove('selected'));
+            el.classList.add('selected');
+        }
+
+        function hideEditAgentModal() {
+            document.getElementById('editAgentModal').classList.remove('active');
+        }
+
+        async function saveAgentEdit() {
+            const agentId = document.getElementById('editAgentId').value;
+            const name = document.getElementById('editAgentName').value.trim();
+            if (!name) { alert('Agent name is required'); return; }
+
+            const strategy = document.getElementById('editSelectedStrategy').value;
+            const minLeverage = parseInt(document.getElementById('editMinLeverage').value);
+            const maxLeverage = parseInt(document.getElementById('editMaxLeverage').value);
+            const riskMin = parseFloat(document.getElementById('editRiskMin').value);
+            const riskMax = parseFloat(document.getElementById('editRiskMax').value);
+            const trailingEnabled = document.getElementById('editTrailingEnabled').checked;
+
+            // Collect checked tokens
+            const checkboxes = document.querySelectorAll('#editTokenList input[type="checkbox"]');
+            const checkedCoins = [];
+            let allChecked = true;
+            checkboxes.forEach(cb => {
+                if (cb.checked) checkedCoins.push(cb.value);
+                else allChecked = false;
+            });
+            // If all are checked, send empty array (= no filter)
+            const allowed_symbols = allChecked ? [] : checkedCoins;
+
+            if (!allChecked && checkedCoins.length === 0) {
+                alert('You must select at least one token, or select all to allow all.');
+                return;
+            }
+
+            try {
+                const resp = await fetch(`/api/agents/${agentId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name,
+                        strategy,
+                        min_leverage: minLeverage,
+                        max_leverage: maxLeverage,
+                        risk_pct_min: riskMin,
+                        risk_pct_max: riskMax,
+                        trailing_enabled: trailingEnabled,
+                        allowed_symbols,
+                    })
+                });
+                if (resp.ok) {
+                    hideEditAgentModal();
+                    loadAgents();
+                    loadAgentDetails(agentId);
+                } else {
+                    const err = await resp.json();
+                    alert('Error: ' + (err.detail || 'Unknown error'));
+                }
+            } catch (e) {
+                console.error('Error saving agent edit:', e);
+                alert('Error saving changes');
+            }
         }
         
         // ── Countdown Timer ──────────────────────────────────────────────

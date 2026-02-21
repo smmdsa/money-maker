@@ -25,6 +25,7 @@ class TradingAgent(Base):
     risk_pct_min = Column(Float, default=0.0)   # 0 = use strategy default
     risk_pct_max = Column(Float, default=0.0)   # 0 = use strategy default
     trailing_enabled = Column(Boolean, default=True)  # enable trailing SL
+    allowed_symbols = Column(JSON, nullable=True)  # list of coin IDs allowed to trade; null = all
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
