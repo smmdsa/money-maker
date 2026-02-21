@@ -1,10 +1,48 @@
 # Money Maker — Feature Backlog
 
-> Última actualización: 2026-02-20 (sesión 8)
+> Última actualización: 2026-02-21 (sesión 9)
 
 ---
 
 ## ✅ Completado
+
+### 🌙 Dark Mode (Sesión 9) — COMPLETADO
+
+**Estado**: ✅ Implementado  
+**Fecha**: 2026-02-21  
+**Área**: UX / Dashboard  
+**ID Backlog**: C2  
+
+**Descripción**: Sistema completo de dark mode con toggle en la barra de navegación, persistencia en localStorage, detección automática de preferencia del OS (`prefers-color-scheme`), y actualización dinámica de gráficos TradingView.
+
+**Cambios implementados:**
+
+1. **`static/index.html`** — Sistema de temas CSS + toggle UI:
+   - ~60 CSS custom properties en `:root` (light) y `[data-theme="dark"]` (dark)
+   - Paleta dark: backgrounds `#0d1117`/`#161b22`, text `#e6edf3`/`#8b949e`, borders `#30363d`
+   - ~120+ reemplazos de colores hardcoded → `var(--xxx)` en CSS rules
+   - Inline styles en HTML body convertidos (backtesting selects, profile buttons, leverage labels, badges)
+   - JS template literals actualizados (backtest metrics, trades table, agent cards, data source badge)
+   - Botón toggle 🌙/☀️ en nav bar con `onclick="toggleTheme()"`
+   - JS: `getPreferredTheme()`, `applyTheme(theme)`, `toggleTheme()`, listener `prefers-color-scheme`
+   - Dark overrides para: profile buttons, API docs, modals, inputs, selects, status badges
+   - `body` y `.card` con `color: var(--text-primary)` / `var(--text-on-card)` para texto visible
+
+2. **`static/charts.js`** — Gráficos theme-aware:
+   - Objeto `THEMES` con paletas light/dark (bg, grid, text, border)
+   - `_currentTheme` state variable
+   - `chartLayoutOptions(height)` usa `THEMES[_currentTheme]` dinámicamente
+   - Método público `applyTheme(theme)` — actualiza `candlestickChart`, `rsiChart`, `equityChart` en vivo
+   - `showChartMessage()` usa color adaptado al tema
+
+**Elementos preservados intencionalmente oscuros** (no afectados por toggle):
+- LLM Reasoning blocks (`#1a1a2e` bg)
+- Decision Detail Modal (`#1a1a2e` bg)
+- Trade History Modal (`#1a1a2e` bg)
+- Market Clocks bar (ya era dark)
+- Nav bar y footer (gradiente dark constante)
+
+---
 
 ### 0. 🚀 Per-Timeframe Scalper Optimization (Sesión 6) — COMPLETADO
 
@@ -1129,7 +1167,7 @@ Bot de Telegram y/o email para notificar:
 | ID | Feature | Impacto | Estado |
 |----|---------|---------|--------|
 | C1 | Comparación lado a lado de múltiples agentes | Medio | Pendiente |
-| C2 | Dark mode | Bajo | Pendiente |
+| C2 | Dark mode | Bajo | ✅ Completado (sesión 9) |
 | C3 | Mobile responsive mejorado | Medio | Pendiente |
 | C4 | Export CSV de trades (análisis externo / impuestos) | **Medio-Alto** | 🔜 Planificado (#4 del próximo ciclo) |
 | C5 | Leaderboard / ranking de agentes | Medio | Pendiente |
