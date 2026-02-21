@@ -405,6 +405,47 @@ class BaseScalperStrategy(BaseStrategy):
             )
 
         # ══════════════════════════════════════════════════════════════
+        # HARD GATE — Slope Direction (SMA21 inclination)
+        # Blocks entries when the reference MA slopes against the trade.
+        # ══════════════════════════════════════════════════════════════
+        ema21_slope_val = ind.get("ema21_slope", 0)
+        slope_gate_thresh = 0.02  # 0.02% minimum inclination
+
+        if long_score > short_score and ema21_slope_val < -slope_gate_thresh:
+            long_score = 0
+            reasons.append(
+                f"SLOPE GATE: Long blocked — SMA21 declining "
+                f"({ema21_slope_val:.3f}%)"
+            )
+        elif short_score > long_score and ema21_slope_val > slope_gate_thresh:
+            short_score = 0
+            reasons.append(
+                f"SLOPE GATE: Short blocked — SMA21 rising "
+                f"({ema21_slope_val:.3f}%)"
+            )
+
+        # ══════════════════════════════════════════════════════════════
+        # HARD GATE — ADX Directional (DI+ vs DI-)
+        # Ensures the dominant directional index agrees with trade side.
+        # ══════════════════════════════════════════════════════════════
+        if adx_data and not has_rsi_extreme_entry:
+            plus_di = adx_data.get("plus_di", 0)
+            minus_di = adx_data.get("minus_di", 0)
+
+            if long_score > short_score and minus_di > plus_di:
+                long_score = 0
+                reasons.append(
+                    f"ADX DIR GATE: Long blocked — DI- ({minus_di:.0f}) "
+                    f"> DI+ ({plus_di:.0f})"
+                )
+            elif short_score > long_score and plus_di > minus_di:
+                short_score = 0
+                reasons.append(
+                    f"ADX DIR GATE: Short blocked — DI+ ({plus_di:.0f}) "
+                    f"> DI- ({minus_di:.0f})"
+                )
+
+        # ══════════════════════════════════════════════════════════════
         # STOPS — ATR-adaptive, per-timeframe R:R
         # ══════════════════════════════════════════════════════════════
         sl = max(atr_pct * p.sl_atr_mult, p.sl_min_pct)

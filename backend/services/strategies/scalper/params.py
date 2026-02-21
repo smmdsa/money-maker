@@ -71,7 +71,7 @@ class ScalperParams:
 
     # ── Order flow / EMA slope ─────────────────────────────────────────
     ofi_against_penalty: int = 0
-    ema_slope_bonus: int = 0
+    ema_slope_bonus: float = 0.0
 
     # ── Cooldown ───────────────────────────────────────────────────────
     cooldown_candles: int = 0
