@@ -1157,7 +1157,7 @@ Bot de Telegram y/o email para notificar:
 |----|---------|---------|--------|
 | B1 | DCA automático como estrategia standalone | Medio | Pendiente |
 | B2 | Detección de oportunidades sin ejecución (alert-only mode) | Medio | ✅ Parcial (Risk Monitor + Market Clock alerts) |
-| B3 | Preparar arquitectura para trading real (Binance/Coinbase API) | **Alto** | Pendiente (requiere madurez previa) |
+| B3 | Preparar arquitectura para trading real (CCXT + Binance/Coinbase) | **Alto** | 🔜 NEXT (#1 del próximo ciclo) |
 | B4 | Portfolio rebalancing automático | Medio | Pendiente |
 | B5 | Trailing stop-loss dinámico (ATR-based) | **Muy Alto** | 🔜 Next (#1 del próximo ciclo) |
 | B6 | Trailing take-profit (lock in gains) | **Muy Alto** | 🔜 Next (#1 — junto con B5) |
@@ -1223,7 +1223,9 @@ Bot de Telegram y/o email para notificar:
 5e. Binance WebSocket Streams ──→ ✅ COMPLETADO (2026-02-20)
 5e². PriceBus Frontend Reactive ──→ ✅ COMPLETADO (2026-02-20)
 5f. Event-Driven Reactive Risk Monitor ──→ ✅ COMPLETADO (2026-02-20)
-─── Próximo ciclo (Top 5) ───────────────────────────────
+C2. Dark Mode ──→ ✅ COMPLETADO (2026-02-21)
+─── Próximo ciclo (Top 6) ───────────────────────────────
+**14. CCXT — Trading Real (B3) ──→ 🔜 NEXT (#1)**
 9.  Trailing SL + Trailing TP (B5+B6) ──→ 🔜 next
 10. Fear & Greed Index (A1) ──→ 🔜 next
 11. Notificaciones Telegram (#6) ──→ 🔜 next
@@ -1277,7 +1279,508 @@ Bot de Telegram y/o email para notificar:
 
 ---
 
-## Notas
+## 🔜 NEXT: B3 — Integración CCXT para Trading Real
+
+> **Prioridad**: #1 del próximo ciclo  
+> **ID Backlog**: B3  
+> **Estimación**: 1-2 sesiones  
+> **Dependencia**: `pip install ccxt` (añadir a requirements.txt)  
+> **Documentación CCXT**: https://docs.ccxt.com/ | https://github.com/ccxt/ccxt
+
+### Objetivo
+
+Abstraer el sistema de ejecución de trades para soportar **dos modos**:
+1. **Paper Trading** (actual) — simulación sin dinero real, balance virtual en DB
+2. **Live Trading** (nuevo) — órdenes reales en Binance Futures vía CCXT
+
+El agente NO debe saber si está en modo paper o live. La abstracción ocurre en la capa de ejecución.
+
+### Arquitectura Propuesta: ExchangeAdapter (Strategy Pattern)
+
+```
+┌─────────────────────┐
+│   TradingAgentService│
+│   (NO cambia)       │
+│   _open_position()  │
+│   _close_position() │
+└──────────┬──────────┘
+           │ usa
+           ▼
+┌─────────────────────┐
+│   ExchangeAdapter   │ ← ABC / Protocol
+│   (nueva interfaz)  │
+│   open_position()   │
+│   close_position()  │
+│   get_balance()     │
+│   get_positions()   │
+│   sync_state()      │
+└──────┬───────┬──────┘
+       │       │
+       ▼       ▼
+┌──────────┐ ┌──────────────┐
+│ Paper    │ │ CCXT Live    │
+│ Adapter  │ │ Adapter      │
+│(actual)  │ │(nuevo)       │
+│DB-only   │ │Binance API   │
+└──────────┘ └──────────────┘
+```
+
+### Interfaz `ExchangeAdapter` (ABC)
+
+```python
+# backend/services/execution/exchange_adapter.py
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Optional, Dict, List
+
+@dataclass
+class OrderResult:
+    """Resultado estandarizado de una orden ejecutada."""
+    success: bool
+    order_id: Optional[str] = None
+    fill_price: float = 0.0         # precio promedio de fill
+    filled_qty: float = 0.0         # cantidad llenada
+    commission: float = 0.0         # fee pagado
+    error: Optional[str] = None
+    raw_response: Optional[Dict] = None  # respuesta cruda del exchange
+
+@dataclass
+class PositionInfo:
+    """Posición abierta en el exchange."""
+    symbol: str
+    side: str                       # "long" | "short"
+    size: float                     # cantidad en coins
+    entry_price: float
+    mark_price: float
+    unrealized_pnl: float
+    leverage: int
+    margin: float
+    liquidation_price: float
+
+@dataclass
+class BalanceInfo:
+    """Balance de la cuenta."""
+    total: float                    # balance total (wallet)
+    available: float                # disponible para nuevas órdenes
+    margin_used: float              # margen en uso
+    unrealized_pnl: float
+
+class ExchangeAdapter(ABC):
+    """Interfaz abstracta para ejecución de trades."""
+
+    @abstractmethod
+    async def open_position(
+        self,
+        symbol: str,            # "BTCUSDT"
+        side: str,              # "long" | "short"
+        margin: float,          # USD de margen
+        leverage: int,
+        stop_loss: float,       # precio SL
+        take_profit: float,     # precio TP
+    ) -> OrderResult:
+        """Abrir posición con SL/TP."""
+        ...
+
+    @abstractmethod
+    async def close_position(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,        # cantidad de coins a cerrar
+    ) -> OrderResult:
+        """Cerrar posición (total o parcial)."""
+        ...
+
+    @abstractmethod
+    async def get_balance(self) -> BalanceInfo:
+        """Obtener balance actual de la cuenta."""
+        ...
+
+    @abstractmethod
+    async def get_positions(self) -> List[PositionInfo]:
+        """Obtener todas las posiciones abiertas."""
+        ...
+
+    @abstractmethod
+    async def set_leverage(self, symbol: str, leverage: int) -> bool:
+        """Configurar leverage para un símbolo."""
+        ...
+
+    @abstractmethod
+    async def sync_state(self) -> Dict:
+        """Sincronizar estado DB ↔ Exchange. Retorna diff."""
+        ...
+
+    @property
+    @abstractmethod
+    def mode(self) -> str:
+        """'paper' | 'live' | 'testnet'"""
+        ...
+```
+
+### Implementación 1: `PaperExchangeAdapter`
+
+Extrae la lógica actual de `_open_position()` y `_close_position()` de `trading_agent.py` (líneas 557-770). Encapsula el flujo actual:
+- `open_position()`: Calcula margin, deduce de `agent.current_balance`, crea `Portfolio` + `Trade` en DB
+- `close_position()`: Calcula PnL, suma a balance, crea `Trade`, elimina `Portfolio`
+- `get_balance()`: Lee `agent.current_balance` desde DB
+- `get_positions()`: Lee `Portfolio` items del agente
+- `sync_state()`: No-op (DB es la fuente de verdad)
+
+**No hay cambio funcional** — solo mover código existente al adapter.
+
+### Implementación 2: `CCXTExchangeAdapter`
+
+```python
+# backend/services/execution/ccxt_adapter.py
+
+import ccxt.async_support as ccxt   # versión async
+from .exchange_adapter import ExchangeAdapter, OrderResult, PositionInfo, BalanceInfo
+
+class CCXTExchangeAdapter(ExchangeAdapter):
+    """Adapter para trading real vía CCXT (Binance Futures)."""
+
+    def __init__(self, config: dict):
+        self.exchange = ccxt.binance({
+            'apiKey': config['api_key'],
+            'secret': config['api_secret'],
+            'sandbox': config.get('testnet', True),  # SIEMPRE testnet primero
+            'options': {
+                'defaultType': 'future',              # Binance Futures (USDT-M)
+                'adjustForTimeDifference': True,
+            },
+            'enableRateLimit': True,
+        })
+
+    async def open_position(self, symbol, side, margin, leverage, stop_loss, take_profit):
+        try:
+            # 1. Set leverage
+            await self.exchange.set_leverage(leverage, symbol)
+
+            # 2. Set margin mode (isolated)
+            await self.exchange.set_margin_mode('isolated', symbol)
+
+            # 3. Calcular cantidad
+            price = (await self.exchange.fetch_ticker(symbol))['last']
+            amount = (margin * leverage) / price
+
+            # 4. Abrir posición (market order)
+            order_side = 'buy' if side == 'long' else 'sell'
+            order = await self.exchange.create_market_order(
+                symbol, order_side, amount
+            )
+
+            # 5. Colocar SL/TP como órdenes condicionales
+            sl_side = 'sell' if side == 'long' else 'buy'
+            await self.exchange.create_order(
+                symbol, 'stop_market', sl_side, amount,
+                params={'stopPrice': stop_loss, 'closePosition': True}
+            )
+            await self.exchange.create_order(
+                symbol, 'take_profit_market', sl_side, amount,
+                params={'stopPrice': take_profit, 'closePosition': True}
+            )
+
+            return OrderResult(
+                success=True,
+                order_id=order['id'],
+                fill_price=float(order.get('average', price)),
+                filled_qty=float(order.get('filled', amount)),
+                commission=float(order.get('fee', {}).get('cost', 0)),
+                raw_response=order,
+            )
+        except Exception as e:
+            return OrderResult(success=False, error=str(e))
+
+    async def close_position(self, symbol, side, quantity):
+        try:
+            close_side = 'sell' if side == 'long' else 'buy'
+            order = await self.exchange.create_market_order(
+                symbol, close_side, quantity, params={'reduceOnly': True}
+            )
+            # Cancelar SL/TP pendientes
+            open_orders = await self.exchange.fetch_open_orders(symbol)
+            for o in open_orders:
+                if o['type'] in ('stop_market', 'take_profit_market'):
+                    await self.exchange.cancel_order(o['id'], symbol)
+
+            return OrderResult(
+                success=True,
+                order_id=order['id'],
+                fill_price=float(order.get('average', 0)),
+                filled_qty=float(order.get('filled', quantity)),
+                commission=float(order.get('fee', {}).get('cost', 0)),
+                raw_response=order,
+            )
+        except Exception as e:
+            return OrderResult(success=False, error=str(e))
+
+    async def get_balance(self):
+        bal = await self.exchange.fetch_balance()
+        usdt = bal.get('USDT', {})
+        return BalanceInfo(
+            total=float(usdt.get('total', 0)),
+            available=float(usdt.get('free', 0)),
+            margin_used=float(usdt.get('used', 0)),
+            unrealized_pnl=0,  # calcular de posiciones
+        )
+
+    async def get_positions(self):
+        positions = await self.exchange.fetch_positions()
+        result = []
+        for p in positions:
+            if float(p.get('contracts', 0)) > 0:
+                result.append(PositionInfo(
+                    symbol=p['symbol'],
+                    side=p['side'],
+                    size=float(p['contracts']),
+                    entry_price=float(p.get('entryPrice', 0)),
+                    mark_price=float(p.get('markPrice', 0)),
+                    unrealized_pnl=float(p.get('unrealizedPnl', 0)),
+                    leverage=int(p.get('leverage', 1)),
+                    margin=float(p.get('initialMargin', 0)),
+                    liquidation_price=float(p.get('liquidationPrice', 0)),
+                ))
+        return result
+
+    async def set_leverage(self, symbol, leverage):
+        try:
+            await self.exchange.set_leverage(leverage, symbol)
+            return True
+        except:
+            return False
+
+    async def sync_state(self):
+        """Sincronizar posiciones del exchange con la DB local."""
+        exchange_positions = await self.get_positions()
+        # TODO: Comparar con Portfolio DB, resolver discrepancias
+        return {"exchange_positions": len(exchange_positions)}
+
+    @property
+    def mode(self):
+        return 'testnet' if self.exchange.sandbox else 'live'
+```
+
+### Archivos a Modificar/Crear
+
+| Archivo | Acción | Detalle |
+|---------|--------|---------|
+| `backend/services/execution/exchange_adapter.py` | **CREAR** | ABC `ExchangeAdapter` + dataclasses `OrderResult`, `PositionInfo`, `BalanceInfo` |
+| `backend/services/execution/paper_adapter.py` | **CREAR** | `PaperExchangeAdapter` — extraer lógica de `trading_agent.py` L557-770 |
+| `backend/services/execution/ccxt_adapter.py` | **CREAR** | `CCXTExchangeAdapter` — implementación CCXT para Binance Futures |
+| `backend/services/execution/__init__.py` | **MODIFICAR** | Exportar nuevos adapters |
+| `backend/services/trading_agent.py` | **MODIFICAR** | Recibir `ExchangeAdapter` en constructor, delegar `_open_position` / `_close_position` al adapter |
+| `backend/models/database.py` | **MODIFICAR** | Añadir campo `execution_mode` a `TradingAgent` ("paper" \| "live" \| "testnet") y `exchange_order_id` a `Trade` |
+| `main.py` | **MODIFICAR** | Inyectar adapter correcto al crear `TradingAgentService`. Nueva ruta API para configurar credenciales |
+| `requirements.txt` | **MODIFICAR** | Añadir `ccxt>=4.0.0` |
+| `.env` | **CREAR** | `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `BINANCE_TESTNET=true` |
+| `static/index.html` | **MODIFICAR** | Indicador de modo (paper/live/testnet) en UI, badge de estado, safety warnings |
+
+### Mapeo de Símbolos: CoinGecko ID → Binance Futures Symbol
+
+El sistema usa CoinGecko IDs internamente (`bitcoin`, `ethereum`, etc.). Para CCXT necesitamos el símbolo Binance Futures:
+
+```python
+SYMBOL_MAP = {
+    # ── Large-cap (8 originales) ──
+    "bitcoin":    "BTC/USDT:USDT",
+    "ethereum":   "ETH/USDT:USDT",
+    "binancecoin":"BNB/USDT:USDT",
+    "cardano":    "ADA/USDT:USDT",
+    "solana":     "SOL/USDT:USDT",
+    "ripple":     "XRP/USDT:USDT",
+    "polkadot":   "DOT/USDT:USDT",
+    "dogecoin":   "DOGE/USDT:USDT",
+    # ── Mid-cap volátiles (15 añadidos sesión 7) ──
+    "avalanche-2":        "AVAX/USDT:USDT",
+    "chainlink":          "LINK/USDT:USDT",
+    "near":               "NEAR/USDT:USDT",
+    "sui":                "SUI/USDT:USDT",
+    "pepe":               "1000PEPE/USDT:USDT",  # x1000 en Binance
+    "aptos":              "APT/USDT:USDT",
+    "arbitrum":           "ARB/USDT:USDT",
+    "filecoin":           "FIL/USDT:USDT",
+    "render-token":       "RENDER/USDT:USDT",
+    "injective-protocol": "INJ/USDT:USDT",
+    "fetch-ai":           "FET/USDT:USDT",
+    "bonk":               "1000BONK/USDT:USDT",  # x1000 en Binance
+    "floki":              "1000FLOKI/USDT:USDT",  # x1000 en Binance
+    "sei-network":        "SEI/USDT:USDT",
+    "wif":                "WIF/USDT:USDT",
+}
+```
+
+> **IMPORTANTE**: PEPE, BONK y FLOKI usan formato `1000XXX` en Binance Futures. El adapter debe manejar el scaling x1000 (dividir cantidad, multiplicar precio).
+
+### Formato de Símbolos CCXT
+
+CCXT usa formato unificado para futures perpetuos: `BASE/QUOTE:SETTLE`
+- `BTC/USDT:USDT` = Perpetuo USDT-margined BTC  
+- El `:USDT` al final indica que es un contrato perpetuo (linear) settlado en USDT
+- Documentación: https://docs.ccxt.com/#/README?id=perpetual-swap-futures
+
+### Integración con MakerExecutionManager (ya existente)
+
+El `MakerExecutionManager` en `backend/services/execution/maker_engine.py` ya usa **callback-based Protocol** (líneas 104-133):
+
+```python
+class PlaceOrderFn(Protocol):
+    async def __call__(self, symbol, side, quantity, price, post_only=True) -> Dict: ...
+
+class CancelOrderFn(Protocol):
+    async def __call__(self, symbol, order_id) -> bool: ...
+
+class GetOrderStatusFn(Protocol):
+    async def __call__(self, symbol, order_id) -> Dict: ...
+
+class GetBestPriceFn(Protocol):
+    async def __call__(self, symbol) -> Dict[str, float]: ...
+```
+
+Estas callbacks se mapean directamente a métodos CCXT:
+- `place_order` → `exchange.create_limit_order()`
+- `cancel_order` → `exchange.cancel_order()`
+- `get_order_status` → `exchange.fetch_order()`
+- `get_best_price` → `exchange.fetch_order_book()` → `{'bid': best_bid, 'ask': best_ask}`
+
+El `CCXTExchangeAdapter` puede instanciar `MakerExecutionManager` internamente para scalpers 1m/3m que necesitan maker orders.
+
+### Fases de Implementación
+
+| Fase | Descripción | Riesgo |
+|------|-------------|--------|
+| **X1** | Crear `ExchangeAdapter` ABC + `OrderResult`/`PositionInfo`/`BalanceInfo` dataclasses | Ninguno |
+| **X2** | Crear `PaperExchangeAdapter` extrayendo lógica de `_open_position` / `_close_position` | Bajo — refactor, sin cambio funcional |
+| **X3** | Modificar `TradingAgentService.__init__()` para recibir adapter; delegar ejecución | Medio — punto de integración |
+| **X4** | Verificar que paper trading sigue funcionando idéntico con el adapter | Bajo — test manual |
+| **X5** | Añadir `ccxt` a requirements, crear `CCXTExchangeAdapter` básico | Bajo |
+| **X6** | Implementar `open_position` + `close_position` con market orders | Medio — interacción con exchange real |
+| **X7** | Añadir SL/TP como órdenes condicionales en Binance | Medio — sintaxis específica de Binance |
+| **X8** | Implementar `sync_state()` — reconciliación DB ↔ Exchange | Alto — lógica compleja de diff |
+| **X9** | UI: Badge de modo, safety confirm para live, config de API keys | Bajo |
+| **X10** | Testing completo en Binance Testnet antes de ir a Mainnet | **Crítico** |
+
+### Configuración Binance Testnet
+
+- **URL Testnet Futures**: `https://testnet.binancefuture.com`
+- **Crear cuenta**: https://testnet.binancefuture.com/
+- **API Keys de testnet**: Generar en la misma web de testnet
+- **CCXT Sandbox Mode**: `exchange.set_sandbox_mode(True)` o `sandbox: True` en config
+- **Balance testnet**: Se resetea automáticamente, incluye fondos de prueba
+
+```python
+# Activar testnet en CCXT:
+exchange = ccxt.binance({
+    'apiKey': 'TESTNET_API_KEY',
+    'secret': 'TESTNET_API_SECRET',
+    'sandbox': True,                    # ← esto activa testnet automáticamente
+    'options': {'defaultType': 'future'},
+})
+```
+
+### Modelo de Datos: Cambios en DB
+
+```python
+# TradingAgent — nuevo campo:
+execution_mode = Column(String, default="paper")  # "paper" | "testnet" | "live"
+
+# Trade — nuevo campo:
+exchange_order_id = Column(String, nullable=True)  # ID de la orden en el exchange real
+exchange_fill_price = Column(Float, nullable=True)  # precio real de fill (puede diferir del mark price)
+exchange_commission = Column(Float, default=0.0)    # comisión real pagada al exchange
+```
+
+### Safety Guards (prioritarios)
+
+1. **NUNCA modo live sin confirmación explícita** — doble confirm en UI + backend
+2. **Testnet primero SIEMPRE** — blocker: no se puede pasar a live sin X horas en testnet
+3. **Max position size en live** — hard limit configurable (e.g., $50 max por trade)
+4. **Kill switch global** — endpoint para cerrar TODAS las posiciones inmediatamente
+5. **Rate limiting CCXT** — `enableRateLimit: True` (CCXT maneja esto automáticamente)
+6. **API keys en .env** — NUNCA en código, NUNCA en DB, NUNCA en frontend
+7. **Logs detallados** — toda interacción con exchange loggeada con request/response
+8. **Balance reconciliation** — verificar saldo real antes de cada trade
+9. **Circuit breaker** — si 3 trades consecutivos fallan, pausar el agente automáticamente
+10. **Paper shadow mode** — poder ejecutar live + paper en paralelo para comparar
+
+### Referencia Rápida CCXT para Binance Futures
+
+```python
+import ccxt.async_support as ccxt
+
+# Crear instancia
+exchange = ccxt.binance({'options': {'defaultType': 'future'}})
+
+# Market order (abrir long)
+order = await exchange.create_market_order('BTC/USDT:USDT', 'buy', 0.001)
+
+# Limit order (maker)
+order = await exchange.create_limit_order('BTC/USDT:USDT', 'buy', 0.001, 64000)
+
+# Set leverage
+await exchange.set_leverage(10, 'BTC/USDT:USDT')
+
+# Set margin mode
+await exchange.set_margin_mode('isolated', 'BTC/USDT:USDT')
+
+# Stop Loss order
+await exchange.create_order('BTC/USDT:USDT', 'stop_market', 'sell', 0.001,
+    params={'stopPrice': 63000, 'closePosition': True})
+
+# Take Profit order
+await exchange.create_order('BTC/USDT:USDT', 'take_profit_market', 'sell', 0.001,
+    params={'stopPrice': 67000, 'closePosition': True})
+
+# Cerrar posición (reduce only)
+await exchange.create_market_order('BTC/USDT:USDT', 'sell', 0.001,
+    params={'reduceOnly': True})
+
+# Obtener posiciones
+positions = await exchange.fetch_positions()
+
+# Obtener balance
+balance = await exchange.fetch_balance()
+
+# Cancelar todas las órdenes
+await exchange.cancel_all_orders('BTC/USDT:USDT')
+
+# Order book (para MakerExecutionManager)
+book = await exchange.fetch_order_book('BTC/USDT:USDT', limit=5)
+best_bid = book['bids'][0][0]
+best_ask = book['asks'][0][0]
+```
+
+### Contexto del Codebase Actual (para el agente implementador)
+
+**Flujo actual de ejecución (Paper Trading)**:
+
+1. `main.py` scheduler llama `run_trading_cycle()` cada 60s
+2. → `TradingAgentService.make_trading_decision(agent, db)`
+3. → Evaluación de estrategia → genera `Signal`
+4. → `_open_position(agent, coin, signal, strategy_key, db)` (L557)
+   - Calcula margin vía `calculate_position_size()`
+   - Deduce de `agent.current_balance` (L614)
+   - Crea `Portfolio` item en DB (L616-630)
+   - Crea `Trade` record en DB (L632-643)
+   - `db.commit()`
+5. Para cerrar: `_close_position(agent, pos, price, db)` (L707)
+   - Calcula PnL (L714-718)
+   - Suma a `agent.current_balance` (L720)
+   - Crea `Trade` record
+   - `db.delete(pos)`
+   - `db.commit()`
+
+**Punto de inyección**: El adapter se inyecta en `TradingAgentService.__init__()`. Los métodos `_open_position` y `_close_position` delegan al adapter en vez de manipular la DB directamente.
+
+**ReactiveRiskMonitor** (L1-365 de `risk_monitor.py`): Usa WS ticks para detectar SL/TP/liquidación cada ~1s. En modo live, el exchange ya tiene SL/TP como órdenes condicionales, pero el monitor sigue siendo necesario para:
+- Trailing stop updates (el exchange no tiene trailing nativo en futuros)
+- Detección de liquidación y sync con DB
+- Estado visual en el dashboard
+
+**MakerExecutionManager** (L1-479 de `maker_engine.py`): Ya listo para CCXT. Solo necesita recibir las callbacks CCXT en vez de mocks.
+
+---
 
 - Todas las features deben ser compatibles con balances pequeños ($50-$100)
 - Priorizar APIs gratuitas o de muy bajo costo
