@@ -60,21 +60,28 @@ _trading_lock = threading.Lock()
 # WebSocket connections manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: set[WebSocket] = set()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.active_connections.add(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        self.active_connections.discard(websocket)
 
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        """Send message to all live connections, pruning dead ones."""
+        dead = []
+        for ws in self.active_connections:
             try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.warning(f"Error broadcasting to WebSocket: {e}")
+                if ws.client_state.name != "CONNECTED":
+                    dead.append(ws)
+                    continue
+                await ws.send_json(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.active_connections.discard(ws)
 
 manager = ConnectionManager()
 
@@ -688,9 +695,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
+            await websocket.receive_text()
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
         manager.disconnect(websocket)
 
 
