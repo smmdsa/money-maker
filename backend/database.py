@@ -46,6 +46,11 @@ def _run_migrations():
         ("portfolio", "trailing_stop_pct", "REAL DEFAULT 0"),
         ("portfolio", "price_extreme", "REAL DEFAULT 0"),
         ("trading_agents", "trailing_enabled", "BOOLEAN DEFAULT 1"),
+        # CCXT / execution-mode support
+        ("trading_agents", "execution_mode", "TEXT DEFAULT 'paper'"),
+        ("trades", "exchange_order_id", "TEXT"),
+        ("trades", "exchange_fill_price", "REAL"),
+        ("trades", "exchange_commission", "REAL DEFAULT 0"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in migrations:

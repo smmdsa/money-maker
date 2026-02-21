@@ -30,6 +30,7 @@ from backend.services.backtester import Backtester
 from backend.services.ws_monitor import BinanceWSManager
 from backend.services.market_data import BinanceProvider
 from backend.services.risk_monitor import ReactiveRiskMonitor
+from backend.services.execution import PaperExchangeAdapter
 from pydantic import BaseModel
 
 # Configure logging
@@ -39,7 +40,8 @@ logger = logging.getLogger(__name__)
 # Initialize services
 market_service = MarketDataService()
 llm_service = LLMService()
-trading_service = TradingAgentService(market_service, llm_service)
+paper_adapter = PaperExchangeAdapter()
+trading_service = TradingAgentService(market_service, llm_service, exchange_adapter=paper_adapter)
 news_service = NewsService()
 backtester = Backtester()
 ws_manager = BinanceWSManager()

@@ -1,7 +1,11 @@
-"""Execution Package — Order execution engines."""
+"""Execution Package — Order execution engines and exchange adapters."""
 from __future__ import annotations
 
-__all__ = ["MakerExecutionManager", "MakerConfig", "MakerOrder", "OrderStatus"]
+__all__ = [
+    "MakerExecutionManager", "MakerConfig", "MakerOrder", "OrderStatus",
+    "ExchangeAdapter", "PaperExchangeAdapter",
+    "OrderResult", "PositionInfo", "BalanceInfo",
+]
 
 from backend.services.execution.maker_engine import (
     MakerExecutionManager,
@@ -9,3 +13,10 @@ from backend.services.execution.maker_engine import (
     MakerOrder,
     OrderStatus,
 )
+from backend.services.execution.exchange_adapter import (
+    ExchangeAdapter,
+    OrderResult,
+    PositionInfo,
+    BalanceInfo,
+)
+from backend.services.execution.paper_adapter import PaperExchangeAdapter

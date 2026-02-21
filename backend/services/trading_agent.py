@@ -20,6 +20,8 @@ from backend.services.strategies import (
     calculate_position_size, calculate_liquidation_price, Signal
 )
 from backend.services.strategies.indicators import SCALP_PROFILES
+from backend.services.execution.exchange_adapter import ExchangeAdapter
+from backend.services.execution.paper_adapter import PaperExchangeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +29,16 @@ logger = logging.getLogger(__name__)
 class TradingAgentService:
     """AI Trading Agent with futures support and configurable strategies."""
 
-    def __init__(self, market_service: MarketDataService, llm_service: LLMService = None):
+    def __init__(
+        self,
+        market_service: MarketDataService,
+        llm_service: LLMService = None,
+        exchange_adapter: ExchangeAdapter = None,
+    ):
         self.market_service = market_service
         self.strategy_engine = StrategyEngine()
         self.llm_service = llm_service
+        self.adapter = exchange_adapter or PaperExchangeAdapter()
 
     # ── Main decision loop ────────────────────────────────────────────────
 
@@ -609,41 +617,27 @@ class TradingAgentService:
         symbol = (market_data.get("symbol", coin[:3]).upper()
                   if market_data else coin[:3].upper())
 
-        agent.current_balance -= margin
+        # Delegate execution to the adapter (paper or live)
+        trail_pct = (signal.trail_pct or signal.stop_loss_pct) if getattr(agent, 'trailing_enabled', True) else 0
+        price_extreme = current_price if getattr(agent, 'trailing_enabled', True) else 0
 
-        portfolio_item = Portfolio(
-            agent_id=agent.id,
-            cryptocurrency=coin,
-            symbol=symbol,
-            amount=amount_coins,
-            avg_buy_price=current_price,
-            current_price=current_price,
-            position_type=direction,
-            leverage=leverage,
-            margin=margin,
-            liquidation_price=liq_price,
-            stop_loss_price=sl_price,
-            take_profit_price=tp_price,
-            trailing_stop_pct=(signal.trail_pct or signal.stop_loss_pct) if getattr(agent, 'trailing_enabled', True) else 0,
-            price_extreme=current_price if getattr(agent, 'trailing_enabled', True) else 0,
+        order = self.adapter.open_position(
+            db=db, agent=agent,
+            coin=coin, symbol=symbol, direction=direction,
+            amount_coins=amount_coins, entry_price=current_price,
+            margin=margin, leverage=leverage,
+            position_value=position_value,
+            liq_price=liq_price, sl_price=sl_price, tp_price=tp_price,
+            trail_pct=trail_pct, price_extreme=price_extreme,
         )
-        db.add(portfolio_item)
 
-        trade = Trade(
-            agent_id=agent.id,
-            cryptocurrency=coin,
-            symbol=symbol,
-            trade_type=f"open_{direction}",
-            amount=amount_coins,
-            price=current_price,
-            total_value=position_value,
-            profit_loss=0,
-            leverage=leverage,
-            margin=margin,
-        )
-        db.add(trade)
+        if not order.success:
+            logger.error(f"Adapter open failed: {order.error}")
+            return {"action": "hold", "coin": coin, "confidence": signal.confidence,
+                    "reasoning": f"Execution failed: {order.error}",
+                    "strategy": strategy_key}
 
-        # Apply LLM confidence adjustment if available
+        # LLM confidence adjustment (stays in agent — not execution concern)
         effective_confidence = signal.confidence
         llm_reasoning = None
         if llm_analysis:
@@ -671,14 +665,18 @@ class TradingAgentService:
             llm_sentiment_adj=llm_analysis.sentiment_adjustment if llm_analysis else 0.0,
         )
 
-        trade.decision_id = decision_id
+        # Link trade to decision via DB id returned by adapter
+        if order.trade_db_id:
+            trade_obj = db.query(Trade).get(order.trade_db_id)
+            if trade_obj:
+                trade_obj.decision_id = decision_id
         db.commit()
 
         tag = "LONG" if direction == "long" else "SHORT"
         logger.info(
             f"Agent {agent.name}: {tag} {coin} — margin ${margin:.2f} "
             f"× {leverage}x = ${position_value:.2f} @ ${current_price:.2f} "
-            f"(SL: ${sl_price:.2f} | TP: ${tp_price:.2f})"
+            f"(SL: ${sl_price:.2f} | TP: ${tp_price:.2f}) [{self.adapter.mode}]"
         )
 
         return {
@@ -717,47 +715,41 @@ class TradingAgentService:
         strategy_key: str = ""
     ) -> Dict:
         """Close an existing LONG or SHORT position."""
-        if force_loss is not None:
-            pnl = force_loss
-        elif pos.position_type == "long":
-            pnl = pos.amount * (current_price - pos.avg_buy_price)
-        else:
-            pnl = pos.amount * (pos.avg_buy_price - current_price)
-
-        cash_return = max(pos.margin + pnl, 0)
-        agent.current_balance += cash_return
-
         trade_type = f"close_{pos.position_type}"
 
-        trade = Trade(
-            agent_id=agent.id,
-            cryptocurrency=pos.cryptocurrency,
-            symbol=pos.symbol,
-            trade_type=trade_type,
-            amount=pos.amount,
-            price=current_price,
-            total_value=pos.amount * current_price,
-            profit_loss=pnl,
-            leverage=pos.leverage,
-            margin=pos.margin,
+        # Delegate execution to the adapter (paper or live)
+        order = self.adapter.close_position(
+            db=db, agent=agent, pos=pos,
+            current_price=current_price,
+            force_loss=force_loss,
         )
-        db.add(trade)
 
+        if not order.success:
+            logger.error(f"Adapter close failed: {order.error}")
+            return {
+                "action": "hold", "coin": pos.cryptocurrency,
+                "confidence": 0, "reasoning": f"Close failed: {order.error}",
+                "strategy": strategy_key,
+            }
+
+        # Decision logging stays in the agent
         decision_id = self._log_decision(db, agent.id, pos.cryptocurrency, {
             "action": trade_type,
             "reasoning": reason,
             "confidence": 0.9,
         }, {}, [], strategy_key)
 
-        trade.decision_id = decision_id
-        db.delete(pos)
+        if order.trade_db_id:
+            trade_obj = db.query(Trade).get(order.trade_db_id)
+            if trade_obj:
+                trade_obj.decision_id = decision_id
         db.commit()
 
         tag = pos.position_type.upper()
         logger.info(
             f"Agent {agent.name}: CLOSE {tag} {pos.cryptocurrency} — "
-            f"PnL: ${pnl:.2f} (margin: ${pos.margin:.2f} → returned ${cash_return:.2f}) "
-            f"| {reason}"
+            f"PnL: ${order.pnl:.2f} (margin: ${pos.margin:.2f} → returned ${order.cash_returned:.2f}) "
+            f"| {reason} [{self.adapter.mode}]"
         )
 
         return {
@@ -766,7 +758,7 @@ class TradingAgentService:
             "confidence": 0.9,
             "reasoning": reason,
             "strategy": strategy_key,
-            "profit_loss": pnl,
+            "profit_loss": order.pnl,
             "leverage": pos.leverage,
         }
 

@@ -25,6 +25,7 @@ class TradingAgent(Base):
     risk_pct_min = Column(Float, default=0.0)   # 0 = use strategy default
     risk_pct_max = Column(Float, default=0.0)   # 0 = use strategy default
     trailing_enabled = Column(Boolean, default=True)  # enable trailing SL
+    execution_mode = Column(String, default="paper")   # "paper" | "testnet" | "live"
     allowed_symbols = Column(JSON, nullable=True)  # list of coin IDs allowed to trade; null = all
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -76,6 +77,9 @@ class Trade(Base):
     profit_loss = Column(Float, default=0.0)
     leverage = Column(Integer, default=1)
     margin = Column(Float, default=0.0)
+    exchange_order_id = Column(String, nullable=True)       # order ID on the real exchange
+    exchange_fill_price = Column(Float, nullable=True)      # actual fill price (may differ from mark)
+    exchange_commission = Column(Float, default=0.0)        # commission paid to exchange
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     agent = relationship("TradingAgent", back_populates="trades")
