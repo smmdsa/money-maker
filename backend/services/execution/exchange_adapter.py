@@ -61,6 +61,8 @@ class BalanceInfo:
     available: float
     margin_used: float
     unrealized_pnl: float
+    # Per-asset breakdown: {"USDT": {"total": ..., "free": ..., "used": ...}, ...}
+    assets: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
 
 # ── Abstract Base Class ─────────────────────────────────────────────────────

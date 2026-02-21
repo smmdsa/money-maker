@@ -205,6 +205,137 @@
             background: rgba(102,126,234,0.1);
         }
 
+        /* ── Execution Mode Badge (nav bar) ────────────────────── */
+        .exec-mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.78em;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-left: auto;
+            white-space: nowrap;
+        }
+        .exec-mode-badge.paper {
+            background: rgba(102, 126, 234, 0.2);
+            color: #99b0ff;
+            border: 1px solid rgba(102, 126, 234, 0.4);
+        }
+        .exec-mode-badge.testnet {
+            background: rgba(255, 152, 0, 0.2);
+            color: #ffb74d;
+            border: 1px solid rgba(255, 152, 0, 0.4);
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+        .exec-mode-badge.live {
+            background: rgba(244, 67, 54, 0.2);
+            color: #ef5350;
+            border: 1px solid rgba(244, 67, 54, 0.5);
+            animation: pulse-glow 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .exec-mode-inline {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.72em;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            vertical-align: middle;
+        }
+        .exec-mode-inline.paper { background: var(--bg-badge-info); color: #1976d2; }
+        .exec-mode-inline.testnet { background: rgba(255,152,0,0.15); color: #e65100; }
+        .exec-mode-inline.live { background: rgba(244,67,54,0.15); color: #c62828; }
+
+        /* ── Kill Switch Button ────────────────────────────────── */
+        .kill-switch-btn {
+            background: #c62828;
+            color: white;
+            border: 2px solid #e53935;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.82em;
+            font-weight: 700;
+            cursor: pointer;
+            margin-left: 12px;
+            transition: all 0.2s;
+        }
+        .kill-switch-btn:hover {
+            background: #b71c1c;
+            box-shadow: 0 0 12px rgba(244,67,54,0.5);
+        }
+
+        /* ── Exchange Balance Bar ──────────────────────────────── */
+        .exchange-balance-bar {
+            display: none;   /* shown via JS when mode != paper */
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+        }
+        .exchange-balance-bar.visible { display: block; }
+        .exchange-balance-bar .eb-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .exchange-balance-bar .eb-title {
+            font-size: 1.05em; font-weight: 700; color: var(--text-primary);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .exchange-balance-bar .eb-refresh {
+            background: none; border: none; cursor: pointer;
+            font-size: 1.1em; opacity: 0.6; transition: opacity 0.2s;
+        }
+        .exchange-balance-bar .eb-refresh:hover { opacity: 1; }
+        .exchange-balance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+        }
+        .eb-asset-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            text-align: center;
+        }
+        .eb-asset-card .eb-asset-name {
+            font-size: 0.78em; text-transform: uppercase;
+            letter-spacing: 0.6px; color: #888; margin-bottom: 6px;
+            font-weight: 600;
+        }
+        .eb-asset-card .eb-asset-wallet {
+            font-size: 1.3em; font-weight: 700; color: var(--text-primary);
+        }
+        .eb-asset-card .eb-asset-detail {
+            font-size: 0.72em; color: #777; margin-top: 4px;
+        }
+        .eb-asset-card .eb-asset-detail span { margin: 0 4px; }
+        .eb-asset-card.eb-asset-usdt { border-color: #26a17b55; }
+        .eb-asset-card.eb-asset-usdc { border-color: #2775ca55; }
+        .eb-asset-card.eb-asset-bnb  { border-color: #f3ba2f55; }
+        .eb-asset-card .eb-pnl-positive { color: #4caf50; }
+        .eb-asset-card .eb-pnl-negative { color: #ff5252; }
+        .eb-totals {
+            display: flex; gap: 24px; margin-top: 12px; padding-top: 10px;
+            border-top: 1px solid var(--border); flex-wrap: wrap;
+        }
+        .eb-totals .eb-total-item {
+            font-size: 0.82em; color: #aaa;
+        }
+        .eb-totals .eb-total-item strong {
+            color: var(--text-primary); font-size: 1.1em; margin-left: 4px;
+        }
+
         .app-body {
             padding: 20px;
         }
@@ -1739,6 +1870,8 @@
         <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode">
             <span class="theme-icon" id="themeIcon">🌙</span>
         </button>
+        <span class="exec-mode-badge paper" id="execModeBadge" title="Execution mode">📄 PAPER</span>
+        <button class="kill-switch-btn" id="killSwitchBtn" onclick="activateKillSwitch()" style="display:none;" title="Emergency: close ALL positions immediately">🚨 KILL SWITCH</button>
     </nav>
 
     <div class="app-body">
@@ -1753,6 +1886,21 @@
             <div class="market-clocks-grid" id="marketClocksGrid">
                 <!-- Populated by JS -->
             </div>
+        </div>
+
+        <!-- ── Exchange Balance (testnet/live only) ────────────── -->
+        <div class="exchange-balance-bar" id="exchangeBalanceBar">
+            <div class="eb-header">
+                <div class="eb-title">
+                    <span>💰 Exchange Balance</span>
+                    <span class="exec-mode-inline" id="ebModeBadge"></span>
+                </div>
+                <button class="eb-refresh" onclick="fetchExchangeBalance()" title="Refresh balance">🔄</button>
+            </div>
+            <div class="exchange-balance-grid" id="exchangeBalanceGrid">
+                <div style="color:#888;font-size:0.9em;">Loading...</div>
+            </div>
+            <div class="eb-totals" id="exchangeBalanceTotals"></div>
         </div>
 
         <div class="dashboard">
@@ -2807,6 +2955,180 @@ ws.onmessage = (e) => {
 
         let selectedAgentId = null;
         let ws = null;
+        let _currentExecMode = 'paper';
+
+        // ══════════════ EXECUTION MODE ═══════════════════════════════════
+
+        async function fetchExecutionMode() {
+            try {
+                const res = await fetch('/api/exchange/status');
+                const data = await res.json();
+                _currentExecMode = data.mode || 'paper';
+                updateExecModeBadge(_currentExecMode);
+            } catch (e) {
+                console.error('Failed to fetch execution mode:', e);
+            }
+        }
+
+        function updateExecModeBadge(mode) {
+            const badge = document.getElementById('execModeBadge');
+            const killBtn = document.getElementById('killSwitchBtn');
+            if (!badge) return;
+            badge.className = 'exec-mode-badge ' + mode;
+            const icons = { paper: '📄', testnet: '🧪', live: '🔴' };
+            const labels = { paper: 'PAPER', testnet: 'TESTNET', live: 'LIVE' };
+            badge.innerHTML = `${icons[mode] || '📄'} ${labels[mode] || mode.toUpperCase()}`;
+            badge.title = mode === 'paper'
+                ? 'Simulated trading — no real money'
+                : mode === 'testnet'
+                    ? 'Connected to Binance Futures TESTNET — test funds only'
+                    : '⚠️ REAL MONEY — connected to Binance Futures MAINNET';
+            // Show kill switch only in testnet/live
+            if (killBtn) {
+                killBtn.style.display = (mode === 'testnet' || mode === 'live') ? 'inline-block' : 'none';
+            }
+            // Show/hide exchange balance bar
+            const ebBar = document.getElementById('exchangeBalanceBar');
+            if (ebBar) {
+                if (mode !== 'paper') {
+                    ebBar.classList.add('visible');
+                    fetchExchangeBalance();
+                } else {
+                    ebBar.classList.remove('visible');
+                }
+            }
+        }
+
+        // ══════════════ EXCHANGE BALANCE ═════════════════════════════════
+
+        let _ebRefreshInterval = null;
+
+        async function fetchExchangeBalance() {
+            try {
+                const res = await fetch('/api/exchange/balance');
+                const data = await res.json();
+                if (data.error) {
+                    document.getElementById('exchangeBalanceGrid').innerHTML =
+                        `<div style="color:#ff5252;font-size:0.9em;">⚠ ${data.error}</div>`;
+                    return;
+                }
+                renderExchangeBalance(data);
+            } catch (e) {
+                console.error('Failed to fetch exchange balance:', e);
+            }
+        }
+
+        function renderExchangeBalance(data) {
+            // Mode badge
+            const modeBadge = document.getElementById('ebModeBadge');
+            if (modeBadge) modeBadge.outerHTML = execModeBadgeHtml(data.mode);
+
+            const grid = document.getElementById('exchangeBalanceGrid');
+            const totals = document.getElementById('exchangeBalanceTotals');
+            const assets = data.assets || {};
+            const assetKeys = Object.keys(assets);
+
+            if (assetKeys.length === 0) {
+                grid.innerHTML = '<div style="color:#888;font-size:0.9em;">No assets found</div>';
+                totals.innerHTML = '';
+                return;
+            }
+
+            // Render asset cards
+            grid.innerHTML = assetKeys.map(name => {
+                const a = assets[name];
+                const cssClass = name.toLowerCase();
+                const pnl = a.unrealized_pnl || 0;
+                const pnlClass = pnl >= 0 ? 'eb-pnl-positive' : 'eb-pnl-negative';
+                const pnlSign = pnl >= 0 ? '+' : '';
+                return `
+                    <div class="eb-asset-card eb-asset-${cssClass}">
+                        <div class="eb-asset-name">${name}</div>
+                        <div class="eb-asset-wallet">${formatNum(a.wallet)}</div>
+                        <div class="eb-asset-detail">
+                            <span>Avail: ${formatNum(a.available)}</span>
+                            <span>Margin: ${formatNum(a.margin)}</span>
+                        </div>
+                        ${pnl !== 0 ? `<div class="eb-asset-detail"><span class="${pnlClass}">PnL: ${pnlSign}${formatNum(pnl)}</span></div>` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            // Totals row
+            const pnlTotal = data.unrealized_pnl || 0;
+            const pnlClass = pnlTotal >= 0 ? 'eb-pnl-positive' : 'eb-pnl-negative';
+            const pnlSign = pnlTotal >= 0 ? '+' : '';
+            totals.innerHTML = `
+                <div class="eb-total-item">Total Equity: <strong>$${formatNum(data.total)}</strong></div>
+                <div class="eb-total-item">Available: <strong>$${formatNum(data.available)}</strong></div>
+                <div class="eb-total-item">Margin Used: <strong>$${formatNum(data.margin_used)}</strong></div>
+                <div class="eb-total-item">Unrealised PnL: <strong class="${pnlClass}">${pnlSign}$${formatNum(pnlTotal)}</strong></div>
+            `;
+        }
+
+        function formatNum(n) {
+            if (n == null) return '0';
+            const abs = Math.abs(n);
+            if (abs >= 1) return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            if (abs >= 0.01) return n.toFixed(4);
+            return n.toFixed(6);
+        }
+
+        // Auto-refresh exchange balance every 30s (only in testnet/live)
+        function startExchangeBalanceRefresh() {
+            if (_ebRefreshInterval) clearInterval(_ebRefreshInterval);
+            _ebRefreshInterval = setInterval(() => {
+                if (_currentExecMode !== 'paper') fetchExchangeBalance();
+            }, 30000);
+        }
+
+        function execModeBadgeHtml(mode) {
+            const cls = mode || 'paper';
+            const icons = { paper: '📄', testnet: '🧪', live: '🔴' };
+            const labels = { paper: 'PAPER', testnet: 'TESTNET', live: 'LIVE' };
+            return `<span class="exec-mode-inline ${cls}">${icons[cls] || '📄'} ${labels[cls] || cls.toUpperCase()}</span>`;
+        }
+
+        async function activateKillSwitch() {
+            const mode = _currentExecMode;
+            const warning = mode === 'live'
+                ? '⚠️ REAL MONEY MODE ⚠️\n\nThis will close ALL positions across ALL agents with MARKET ORDERS.\n\nAre you absolutely sure?'
+                : 'This will close ALL positions across ALL agents immediately.\n\nAre you sure?';
+            if (!confirm(warning)) return;
+            // Double confirm for live
+            if (mode === 'live') {
+                if (!confirm('FINAL CONFIRMATION: Close ALL positions on Binance Futures MAINNET?')) return;
+            }
+            try {
+                const res = await fetch('/api/exchange/kill-switch', { method: 'POST' });
+                const data = await res.json();
+                alert(`Kill switch executed:\n• Positions closed: ${data.positions_closed}\n• Errors: ${data.errors?.length || 0}`);
+                loadAgents();
+                if (selectedAgentId) loadAgentDetails(selectedAgentId);
+            } catch (e) {
+                alert('Kill switch failed: ' + e.message);
+            }
+        }
+
+        async function testExchangeConnection() {
+            try {
+                const res = await fetch('/api/exchange/test-connection', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    let msg = `✅ ${data.message}`;
+                    if (data.balance) {
+                        msg += `\n\nBalance: $${data.balance.total.toFixed(2)}`;
+                        msg += `\nAvailable: $${data.balance.available.toFixed(2)}`;
+                        msg += `\nMargin used: $${data.balance.margin_used.toFixed(2)}`;
+                    }
+                    alert(msg);
+                } else {
+                    alert(`❌ Connection failed:\n${data.message}`);
+                }
+            } catch (e) {
+                alert('Connection test failed: ' + e.message);
+            }
+        }
 
         // ══════════════════════════════════════════════════════════════════
         // PriceBus — Reactive event dispatcher (single source of truth)
@@ -2935,7 +3257,7 @@ ws.onmessage = (e) => {
 
                 agentList.innerHTML = agents.map(agent => `
                     <div class="agent-item ${selectedAgentId === agent.id ? 'selected' : ''}" data-agent-id="${agent.id}" onclick="selectAgent(${agent.id})">
-                        <div class="agent-name">${agent.name}</div>
+                        <div class="agent-name">${agent.name} ${execModeBadgeHtml(agent.execution_mode)}</div>
                         <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span>
                         <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
                         <div class="agent-stats">
@@ -2994,7 +3316,8 @@ ws.onmessage = (e) => {
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11.498 2.064a1.75 1.75 0 0 1 2.476 0l.96.96a1.75 1.75 0 0 1 0 2.476l-7.5 7.5a1.75 1.75 0 0 1-.834.462l-3.109.777a.75.75 0 0 1-.91-.91l.778-3.11a1.75 1.75 0 0 1 .462-.833l7.677-7.322zm1.416 1.06a.25.25 0 0 0-.354 0L5.083 10.6a.25.25 0 0 0-.066.12l-.507 2.027 2.027-.507a.25.25 0 0 0 .12-.066l7.477-7.477a.25.25 0 0 0 0-.354l-.96-.96z"/></svg>
                             </button>
                         </div>
-                        <p><strong>Status:</strong> <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span></p>
+                        <p><strong>Status:</strong> <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span>
+                           ${execModeBadgeHtml(agent.execution_mode)}</p>
                         <p><strong>Strategy:</strong> <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
                            <span class="badge-leverage">${(agent.min_leverage || 1)}x–${agent.max_leverage}x</span>
                            ${(agent.risk_pct_min > 0 || agent.risk_pct_max > 0) ? `<span class="badge-leverage" style="background:var(--bg-badge-long);color:#2e7d32;">Risk ${agent.risk_pct_min || '?'}–${agent.risk_pct_max || '?'}%</span>` : ''}
@@ -4858,6 +5181,8 @@ ws.onmessage = (e) => {
             PriceBus.on('wsStatus', _onWsStatusChange);       // WS badge + data source
 
             // ── Initial data load (REST) ────────────────────────────────
+            fetchExecutionMode(); // Execution mode badge in nav + exchange balance
+            startExchangeBalanceRefresh(); // Auto-refresh balance every 30s
             loadAgents();
             refreshPrices();    // Will always REST on first load (WS not connected yet)
             refreshNews();

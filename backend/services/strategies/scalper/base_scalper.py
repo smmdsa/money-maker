@@ -1,15 +1,17 @@
 """
-BaseScalperStrategy — Polymorphic base for all scalper timeframe variants.
+BaseScalperStrategy — Polymorphic base for all scalper timeframe variants (V5).
 
-Implements the 8-layer scoring engine (EMA alignment, RSI zones, Bollinger
-Bands, MACD crossover, StochRSI, ADX trend strength, Momentum, Volume) plus
-post-scoring filters (counter-trend penalty, leading-indicator conflict gate,
-volume gate, ADX filter, OFI order-flow filter, EMA slope confluence, and
-multi-timeframe alignment).
-
-Concrete subclasses (Scalper1M … Scalper1H) provide per-timeframe parameters
-via the ``params`` property — the scoring engine itself is *identical* across
-all timeframes.
+V5 architecture changes from V4:
+  • REMOVED: Slope Gate, ADX Directional Gate, CVD Gate (triple-redundant
+    direction checks that stacked to make entries mathematically impossible)
+  • ADDED: Layer 9 — Candlestick Patterns (engulfing, hammer, pin bar, 3WS/3BC)
+  • ADDED: Layer 10 — VWAP bias alignment
+  • SOFTENED: Volume gate (reduce 30% vs halving), OFI penalty (capped -2),
+    leading conflict penalty (capped -2), ADX dampen (capped -1)
+  • LOOSENED: Volatility block threshold (only extreme spikes)
+  • PHILOSOPHY: Inclusive scoring (each filter ADDS confidence) rather than
+    exclusive gating (each filter BLOCKS entries). High frequency + small edge
+    per trade = consistent profits via law of large numbers.
 """
 from __future__ import annotations
 
@@ -55,7 +57,7 @@ class BaseScalperStrategy(BaseStrategy):
         entry_price: float = 0.0,
         mtf_context: Optional[Dict] = None,
     ) -> Signal:
-        """8-layer scoring engine + OFI + EMA slope + MTF.
+        """10-layer scoring engine + soft filters (V5).
 
         Layers:
           1. EMA 3-line alignment
@@ -66,14 +68,16 @@ class BaseScalperStrategy(BaseStrategy):
           6. ADX trend strength
           7. Momentum
           8. Volume confirmation
+          9. Candlestick patterns (V5)
+         10. VWAP bias alignment (V5)
 
-        Post-scoring filters:
+        Post-scoring filters (V5 — soft penalties, NO hard zero-gates):
           • Counter-trend penalty
-          • Leading-indicator conflict gate
-          • Volume gate
-          • ADX filter (hard gate or soft dampen)
-          • OFI order-flow filter
-          • EMA slope confluence
+          • Leading-indicator conflict (capped -2)
+          • Volume gate (30% reduction, not halving)
+          • ADX filter (soft dampen only, capped -1)
+          • OFI order-flow filter (capped -2)
+          • EMA slope confluence (bonus)
           • Multi-timeframe alignment + S/R proximity
         """
         p = self._params
@@ -81,6 +85,31 @@ class BaseScalperStrategy(BaseStrategy):
         reasons: list[str] = []
         long_score = 0
         short_score = 0
+
+        # ══════════════════════════════════════════════════════════════
+        # EARLY GATE — Volatility Block (only extreme spikes)
+        # V5: loosened threshold — only blocks genuine flash crashes,
+        # not normal intraday volatility.
+        # ══════════════════════════════════════════════════════════════
+        if p.volatility_block_atr_mult > 0:
+            atr_vol_ratio = ind.get("atr_volatility_ratio")
+            if atr_vol_ratio is not None and atr_vol_ratio > p.volatility_block_atr_mult:
+                return self._build_signal(
+                    0, 0,
+                    [f"VOLATILITY BLOCK: ATR ratio {atr_vol_ratio:.2f} > "
+                     f"{p.volatility_block_atr_mult:.1f}x — no entries"],
+                    cfg, has_long, has_short,
+                    max(ind.get("atr_pct", 2.0) * p.sl_atr_mult, p.sl_min_pct),
+                    max(ind.get("atr_pct", 2.0) * p.tp_atr_mult, p.sl_min_pct * p.tp_min_rr),
+                    entry_price, price,
+                    -1.0 if p.disable_trailing else max(
+                        ind.get("atr_pct", 2.0) * cfg.trail_atr_mult,
+                        ind.get("atr_pct", 2.0) * p.sl_atr_mult,
+                    ),
+                    min_score_override=p.min_score,
+                    confidence_divisor=p.conf_divisor,
+                    min_score_margin=p.min_score_margin,
+                )
 
         # ── Extract indicators ───────────────────────────────────────
         rsi = ind.get("rsi")
@@ -266,6 +295,47 @@ class BaseScalperStrategy(BaseStrategy):
                     short_score += 1
 
         # ══════════════════════════════════════════════════════════════
+        # LAYER 9 — Candlestick Patterns (V5)
+        # Engulfing (+1-2), Hammer/Shooting Star (+1-2),
+        # Pin Bar (+2), Three White Soldiers/Black Crows (+3)
+        # ══════════════════════════════════════════════════════════════
+        candle_pat = ind.get("candle_pattern")
+        if candle_pat and p.pattern_weight > 0:
+            pat_dir = candle_pat["direction"]
+            pat_str = candle_pat["strength"]
+            bonus = max(1, int(pat_str * p.pattern_weight))
+            if pat_dir == "long":
+                long_score += bonus
+                reasons.append(
+                    f"Candle pattern: {candle_pat['pattern']} (+{bonus})"
+                )
+            elif pat_dir == "short":
+                short_score += bonus
+                reasons.append(
+                    f"Candle pattern: {candle_pat['pattern']} (+{bonus})"
+                )
+
+        # ══════════════════════════════════════════════════════════════
+        # LAYER 10 — VWAP Bias Alignment (V5)
+        # Price above VWAP = institutional bullish bias,
+        # below = bearish bias. Simple +1 when aligned with direction.
+        # ══════════════════════════════════════════════════════════════
+        vwap_data = ind.get("vwap")
+        if vwap_data and p.vwap_bonus > 0:
+            if vwap_data["above"] and long_score >= short_score:
+                long_score += p.vwap_bonus
+                reasons.append(
+                    f"VWAP bullish (price {vwap_data['distance_pct']:+.2f}% "
+                    f"above VWAP)"
+                )
+            elif vwap_data["below"] and short_score >= long_score:
+                short_score += p.vwap_bonus
+                reasons.append(
+                    f"VWAP bearish (price {vwap_data['distance_pct']:+.2f}% "
+                    f"below VWAP)"
+                )
+
+        # ══════════════════════════════════════════════════════════════
         # PENALTY — Counter-trend (fighting the EMA alignment)
         # ══════════════════════════════════════════════════════════════
         has_rsi_extreme = rsi is not None and (
@@ -287,7 +357,9 @@ class BaseScalperStrategy(BaseStrategy):
                 )
 
         # ══════════════════════════════════════════════════════════════
-        # LEADING INDICATOR CONFLICT GATE
+        # LEADING INDICATOR CONFLICT (V5: capped, no longer devastating)
+        # V4 had penalty=4, which alone could destroy any setup.
+        # V5 caps at -2 and requires ≥2 conflicting indicators.
         # ══════════════════════════════════════════════════════════════
         if p.leading_conflict_penalty > 0:
             warns_against_long = sum([
@@ -310,13 +382,14 @@ class BaseScalperStrategy(BaseStrategy):
             ])
 
             pen = p.leading_conflict_penalty
-            if long_score > short_score and warns_against_long >= 1:
+            # V5: require ≥2 conflicting indicators (was ≥1)
+            if long_score > short_score and warns_against_long >= 2:
                 long_score = max(0, long_score - pen)
                 reasons.append(
                     f"Leading conflict: {warns_against_long} indicator(s) "
                     f"vs long, -{pen}"
                 )
-            elif short_score > long_score and warns_against_short >= 1:
+            elif short_score > long_score and warns_against_short >= 2:
                 short_score = max(0, short_score - pen)
                 reasons.append(
                     f"Leading conflict: {warns_against_short} indicator(s) "
@@ -324,28 +397,26 @@ class BaseScalperStrategy(BaseStrategy):
                 )
 
         # ══════════════════════════════════════════════════════════════
-        # VOLUME GATE — halve score without volume confirm
+        # VOLUME GATE — V5: reduce by 30% (not halving)
+        # Halving was too aggressive — many valid setups in low-vol
+        # periods (Asian session, pre-news consolidation).
         # ══════════════════════════════════════════════════════════════
         if p.require_volume and not has_volume:
-            long_score = long_score // 2
-            short_score = short_score // 2
+            reduce_long = max(1, int(long_score * 0.3))
+            reduce_short = max(1, int(short_score * 0.3))
+            long_score = max(0, long_score - reduce_long)
+            short_score = max(0, short_score - reduce_short)
 
         # ══════════════════════════════════════════════════════════════
-        # ADX FILTER — hard gate or soft dampen
+        # ADX FILTER — soft dampen only (V5: no hard gate)
+        # V5 removes the hard gate option entirely. ADX at low TFs is
+        # noisy; hard-gating on ADX kills 40-60% of valid entries.
         # ══════════════════════════════════════════════════════════════
         has_rsi_extreme_entry = rsi is not None and (
             rsi < p.rsi_oversold or rsi > p.rsi_overbought
         )
 
-        if p.require_adx_trending and not has_rsi_extreme_entry:
-            if adx_data and not adx_data.get("trending"):
-                long_score = 0
-                short_score = 0
-                reasons.append(
-                    f"ADX gate: not trending "
-                    f"({adx_data.get('adx', 0):.0f}) — no entries"
-                )
-        elif (
+        if (
             adx_data
             and not adx_data.get("trending")
             and not has_rsi_extreme_entry
@@ -360,7 +431,7 @@ class BaseScalperStrategy(BaseStrategy):
                 )
 
         # ══════════════════════════════════════════════════════════════
-        # OFI FILTER — Order Flow Imbalance
+        # OFI FILTER — Order Flow Imbalance (V5: penalty only, no gate)
         # ══════════════════════════════════════════════════════════════
         ofi_data = ind.get("ofi")
         if ofi_data and p.ofi_against_penalty > 0:
@@ -376,6 +447,12 @@ class BaseScalperStrategy(BaseStrategy):
                 reasons.append(
                     f"OFI bullish ({ofi_ratio:.2f}) — short dampened -{pen}"
                 )
+
+        # ══════════════════════════════════════════════════════════════
+        # V5: CVD Gate REMOVED — redundant with OFI filter above.
+        # Having both OFI penalty AND CVD zero-gate meant the same
+        # signal (volume direction) blocked entries TWICE.
+        # ══════════════════════════════════════════════════════════════
 
         # ══════════════════════════════════════════════════════════════
         # EMA SLOPE CONFLUENCE
@@ -405,45 +482,11 @@ class BaseScalperStrategy(BaseStrategy):
             )
 
         # ══════════════════════════════════════════════════════════════
-        # HARD GATE — Slope Direction (SMA21 inclination)
-        # Blocks entries when the reference MA slopes against the trade.
+        # V5: REMOVED — Slope Gate, ADX Directional Gate
+        # These were triple-redundant with EMA alignment (Layer 1) and
+        # ADX filter above. Three independent hard zero-gates checking
+        # the same thing (direction) made entry probability near zero.
         # ══════════════════════════════════════════════════════════════
-        ema21_slope_val = ind.get("ema21_slope", 0)
-        slope_gate_thresh = 0.02  # 0.02% minimum inclination
-
-        if long_score > short_score and ema21_slope_val < -slope_gate_thresh:
-            long_score = 0
-            reasons.append(
-                f"SLOPE GATE: Long blocked — SMA21 declining "
-                f"({ema21_slope_val:.3f}%)"
-            )
-        elif short_score > long_score and ema21_slope_val > slope_gate_thresh:
-            short_score = 0
-            reasons.append(
-                f"SLOPE GATE: Short blocked — SMA21 rising "
-                f"({ema21_slope_val:.3f}%)"
-            )
-
-        # ══════════════════════════════════════════════════════════════
-        # HARD GATE — ADX Directional (DI+ vs DI-)
-        # Ensures the dominant directional index agrees with trade side.
-        # ══════════════════════════════════════════════════════════════
-        if adx_data and not has_rsi_extreme_entry:
-            plus_di = adx_data.get("plus_di", 0)
-            minus_di = adx_data.get("minus_di", 0)
-
-            if long_score > short_score and minus_di > plus_di:
-                long_score = 0
-                reasons.append(
-                    f"ADX DIR GATE: Long blocked — DI- ({minus_di:.0f}) "
-                    f"> DI+ ({plus_di:.0f})"
-                )
-            elif short_score > long_score and plus_di > minus_di:
-                short_score = 0
-                reasons.append(
-                    f"ADX DIR GATE: Short blocked — DI+ ({plus_di:.0f}) "
-                    f"> DI- ({minus_di:.0f})"
-                )
 
         # ══════════════════════════════════════════════════════════════
         # STOPS — ATR-adaptive, per-timeframe R:R

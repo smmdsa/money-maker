@@ -1,13 +1,18 @@
-"""
-Scalper 15-Minute — Intraday trend scalper with RSI(12), MACD(10,22,8), BB(18).
+"""Scalper 15-Minute — Intraday trend scalper (V5).
 
-V3e-optimised configuration ("La Tendencia Intradía"):
-  • min_score=7 + ADX hard gate + leading conflict penalty=4
-  • EMA slope bonus=1.0 (slope must be positive for longs)
-  • MTF aligned against 1h — penalty=3 blocks counter-trend entries
-  • SL 1.6×ATR, TP 3.0×ATR, cooldown=10 (150 min)
-  • Squeeze scoring disabled — wait for BB expansion, not contraction
-  • Volume required — no entries in dry/illiquid bars
+V5 rebalances 15m for profitability + frequency.
+15m is where indicators become genuinely reliable — ADX, MACD, EMA
+all produce meaningful signals at this timeframe.
+
+V5 changes:
+  • min_score=5 (was 7)
+  • min_score_margin=2 (was 3)
+  • ADX hard gate REMOVED (V5 uses soft dampen only across all TFs)
+  • CVD gate, slope gate, ADX directional gate REMOVED
+  • Candlestick patterns + VWAP as new alpha layers
+  • Trailing stop ENABLED (15m moves justify it)
+  • Cooldown: 4 candles = 1hr (was 10 = 2.5hr)
+  • Squeeze scoring enabled (15m squeezes are meaningful)
 """
 from __future__ import annotations
 
@@ -16,57 +21,65 @@ from backend.services.strategies.scalper.params import ScalperParams
 
 PARAMS = ScalperParams(
     # ── Entry quality ──────────────────────────────────────────────
-    min_score=7,
-    conf_divisor=12.0,
-    min_score_margin=3,
+    min_score=4,                 # V5: probado con 5 = ~11 trades, bajamos a 4
+    conf_divisor=10.0,
+    min_score_margin=1,          # V5: gap mínimo para frecuencia
     # ── EMA ────────────────────────────────────────────────────────
     ema_spread_threshold=0.08,
-    ema_full_score=2,
+    ema_full_score=2,            # 15m EMA alignment es confiable
     ema_partial_score=1,
     # ── RSI ────────────────────────────────────────────────────────
-    rsi_oversold=25,
-    rsi_overbought=75,
-    rsi_pullback_range=(40, 50),
-    rsi_bounce_range=(50, 60),
+    rsi_oversold=28,
+    rsi_overbought=72,
+    rsi_pullback_range=(38, 52),
+    rsi_bounce_range=(48, 62),
     # ── Bollinger ──────────────────────────────────────────────────
-    bb_entry_low=0.18,
-    bb_entry_high=0.82,
+    bb_entry_low=0.20,
+    bb_entry_high=0.80,
     bb_extreme_low=0.06,
     bb_extreme_high=0.94,
     # ── Momentum ───────────────────────────────────────────────────
     momentum_threshold=0.25,
     # ── Risk management ────────────────────────────────────────────
-    sl_atr_mult=1.6,
-    tp_atr_mult=3.0,
+    sl_atr_mult=1.5,
+    tp_atr_mult=3.0,             # V5: R:R 2:1 con trailing
     sl_min_pct=0.50,
-    tp_min_rr=2.3,
-    # ── Filters ────────────────────────────────────────────────────
-    counter_trend_penalty=1,
-    require_volume=True,
-    require_adx_trending=True,   # hard gate — golden config
-    leading_conflict_penalty=4,  # heavy penalty (prevents worst trades)
-    disable_squeeze_score=True,  # fires constantly on 15m, zero value
-    squeeze_requires_volume=True,
-    disable_trailing=True,
-    # ── Order flow / EMA slope ─────────────────────────────────────
-    ofi_against_penalty=0,
+    tp_min_rr=2.0,
+    # ── Filters (V5: reducidos) ────────────────────────────────────
+    counter_trend_penalty=1,     # V5: de 2 a 1
+    require_volume=False,        # V5: 15m no necesita volumen obligatorio
+    require_adx_trending=False,  # V5: ADX soft dampen only (era hard gate)
+    adx_soft_dampen=1,           # V5: de 0 (hard gate) a 1 (soft)
+    leading_conflict_penalty=2,  # V5: de 4 a 2
+    disable_squeeze_score=False, # V5: squeeze habilitado
+    squeeze_requires_volume=False,
+    disable_trailing=False,      # V5: trailing ON (15m justifica)
+    # ── Order flow ─────────────────────────────────────────────────
+    ofi_against_penalty=1,       # V5: de 2 a 1 (15m es trend, no flow)
     ema_slope_bonus=1.0,
-    # ── Cooldown (10 × 15m = 150 min) ─────────────────────────────
-    cooldown_candles=10,
-    # ── MTF — validate against 1h trend ────────────────────────────
-    mtf_trend_bonus=0,
-    mtf_against_penalty=3,
+    # ── Candlestick patterns (V5) ──────────────────────────────────
+    pattern_weight=1.0,
+    vwap_bonus=1,
+    # ── Volatility block (conservador) ─────────────────────────────
+    volatility_block_atr_mult=3.5,  # V5: de 3.0 a 3.5
+    daily_circuit_breaker_pct=3.0,
+    # ── Cooldown (4 × 15m = 1hr) ──────────────────────────────────
+    cooldown_candles=4,          # V5: de 10 a 4
+    # ── MTF ────────────────────────────────────────────────────────
+    mtf_trend_bonus=1,           # V5: bonus positivo
+    mtf_against_penalty=2,       # V5: de 3 a 2
     mtf_sr_proximity_pct=0.20,
-    mtf_sr_penalty=2,
-    mtf_require_trend=True,
+    mtf_sr_penalty=1,            # V5: de 2 a 1
+    mtf_require_trend=False,     # V5: NO bloquear por MTF neutral
 )
 
 
 class Scalper15M(BaseScalperStrategy):
-    """15-minute intraday trend scalper (V3e — \"La Tendencia Intradía\").
+    """15-minute trend scalper (V5).
 
-    Hard ADX gate + EMA slope bonus + MTF 1h alignment.
-    BB squeeze ignored — waits for volatility expansion. Volume mandatory.
+    Reliable indicators at this TF. Trailing stop captures swings.
+    Squeeze breakouts enabled. Pattern recognition for entries.
+    Target: 1-4 trades/day with 55-65% win rate.
     """
 
     def __init__(self) -> None:

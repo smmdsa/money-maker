@@ -73,6 +73,37 @@ class ScalperParams:
     ofi_against_penalty: int = 0
     ema_slope_bonus: float = 0.0
 
+    # ── Candlestick patterns (V5) ─────────────────────────────────────
+    # Multiplier for candlestick pattern strength scores.
+    # 1.0 = use raw strength (1-3 pts), 0.0 = disable pattern layer.
+    pattern_weight: float = 1.0
+
+    # ── VWAP alignment (V5) ────────────────────────────────────────────
+    # Bonus when price aligns with VWAP direction.
+    vwap_bonus: int = 1
+
+    # ── Execution mode ─────────────────────────────────────────────────
+    # "taker" = standard market orders, "maker_only" = Post-Only limits.
+    # Strategies that declare "maker_only" signal the execution layer to
+    # route through MakerExecutionManager, cutting fees ~60%.
+    execution_mode: str = "taker"
+    max_slippage_tolerance: float = 0.001  # 0.1% — ignored for maker_only
+
+    # ── CVD / Microstructure ───────────────────────────────────────────
+    # When True, the OFI-based volume delta (CVD proxy) must align with
+    # the trade direction.  Misalignment zeroes out the score entirely.
+    cvd_alignment_required: bool = False
+
+    # ── Volatility block ───────────────────────────────────────────────
+    # Block entries when fast ATR / slow ATR exceeds this multiplier.
+    # 0.0 = disabled.  Recommended: 2.0-3.0 for low-TF scalpers.
+    volatility_block_atr_mult: float = 0.0
+
+    # ── Daily circuit breaker ──────────────────────────────────────────
+    # Max allowed daily loss as % of capital.  0.0 = disabled.
+    # The execution layer reads this to enforce session-level risk limits.
+    daily_circuit_breaker_pct: float = 0.0
+
     # ── Cooldown ───────────────────────────────────────────────────────
     cooldown_candles: int = 0
 

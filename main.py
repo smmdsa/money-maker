@@ -30,18 +30,55 @@ from backend.services.backtester import Backtester
 from backend.services.ws_monitor import BinanceWSManager
 from backend.services.market_data import BinanceProvider
 from backend.services.risk_monitor import ReactiveRiskMonitor
-from backend.services.execution import PaperExchangeAdapter
+from backend.services.execution import PaperExchangeAdapter, CCXTExchangeAdapter
 from pydantic import BaseModel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# ── Adapter factory (reads EXECUTION_MODE from env) ─────────────────────
+
+def _build_exchange_adapter():
+    """Create the appropriate ExchangeAdapter based on EXECUTION_MODE env var.
+
+    Values: 'paper' (default) | 'testnet' | 'live'
+    testnet/live require BINANCE_API_KEY and BINANCE_API_SECRET.
+    """
+    mode = os.getenv("EXECUTION_MODE", "paper").lower().strip()
+
+    if mode == "paper":
+        logger.info("Execution mode: PAPER (simulated)")
+        return PaperExchangeAdapter()
+
+    api_key = os.getenv("BINANCE_API_KEY", "")
+    api_secret = os.getenv("BINANCE_API_SECRET", "")
+
+    if not api_key or not api_secret:
+        logger.warning(
+            f"EXECUTION_MODE={mode} but BINANCE_API_KEY/SECRET not set — "
+            f"falling back to paper mode"
+        )
+        return PaperExchangeAdapter()
+
+    if mode == "testnet":
+        logger.info("Execution mode: TESTNET (Binance Futures testnet)")
+        return CCXTExchangeAdapter(api_key, api_secret, testnet=True)
+
+    if mode == "live":
+        logger.info("⚠️  Execution mode: LIVE — REAL MONEY ⚠️")
+        return CCXTExchangeAdapter(api_key, api_secret, testnet=False)
+
+    logger.warning(f"Unknown EXECUTION_MODE '{mode}' — falling back to paper")
+    return PaperExchangeAdapter()
+
+
 # Initialize services
 market_service = MarketDataService()
 llm_service = LLMService()
-paper_adapter = PaperExchangeAdapter()
-trading_service = TradingAgentService(market_service, llm_service, exchange_adapter=paper_adapter)
+exchange_adapter = _build_exchange_adapter()
+trading_service = TradingAgentService(market_service, llm_service, exchange_adapter=exchange_adapter)
 news_service = NewsService()
 backtester = Backtester()
 ws_manager = BinanceWSManager()
@@ -281,6 +318,7 @@ def list_agents(db: Session = Depends(get_db)):
             "status": agent.status,
             "strategy": agent.strategy,
             "max_leverage": agent.max_leverage,
+            "execution_mode": exchange_adapter.mode,
             "open_positions": len(positions),
             "positions": positions,
             "created_at": agent.created_at.isoformat(),
@@ -355,6 +393,7 @@ def get_agent(agent_id: int, db: Session = Depends(get_db)):
         "risk_pct_max": getattr(agent, 'risk_pct_max', 0),
         "trailing_enabled": getattr(agent, 'trailing_enabled', True),
         "allowed_symbols": getattr(agent, 'allowed_symbols', None),
+        "execution_mode": exchange_adapter.mode,
         "portfolio": portfolio_items,
         "created_at": agent.created_at.isoformat()
     }
@@ -941,6 +980,7 @@ def health_check():
     """Check API and service health"""
     return {
         "status": "ok",
+        "execution_mode": exchange_adapter.mode,
         "market_service": market_service.health_check(),
         "llm_service": llm_service.health_check(),
         "websocket": ws_manager.health_check(),
@@ -950,6 +990,151 @@ def health_check():
 
 
 # ── Balance Repair ────────────────────────────────────────────────────────
+
+
+# ── Exchange Balance & Connection ─────────────────────────────────────────
+
+@app.get("/api/exchange/balance")
+def exchange_balance():
+    """Return detailed exchange balance with per-asset breakdown.
+
+    In paper mode, returns the aggregate of local agent balances.
+    In testnet/live, fetches real data from Binance Futures.
+    """
+    mode = exchange_adapter.mode
+    if mode == "paper":
+        db = next(get_db())
+        try:
+            from backend.models.database import TradingAgent as TA
+            agents = db.query(TA).all()
+            total_bal = sum(a.current_balance for a in agents)
+            total_margin = sum(
+                sum(p.margin for p in a.portfolio if p.amount > 0)
+                for a in agents
+            )
+            return {
+                "mode": "paper",
+                "total": round(total_bal + total_margin, 2),
+                "available": round(total_bal, 2),
+                "margin_used": round(total_margin, 2),
+                "unrealized_pnl": 0.0,
+                "assets": {},
+            }
+        finally:
+            db.close()
+
+    try:
+        # Use a dummy agent — real CCXT adapter reads from exchange, not DB
+        dummy = type('A', (), {'portfolio': [], 'current_balance': 0})()
+        bal = exchange_adapter.get_balance(dummy)
+        return {
+            "mode": mode,
+            "total": round(bal.total, 4),
+            "available": round(bal.available, 4),
+            "margin_used": round(bal.margin_used, 4),
+            "unrealized_pnl": round(bal.unrealized_pnl, 4),
+            "assets": bal.assets,
+        }
+    except Exception as exc:
+        return {"mode": mode, "error": str(exc)}
+
+
+@app.get("/api/exchange/status")
+def exchange_status():
+    """Return current execution mode and connection status."""
+    return {
+        "mode": exchange_adapter.mode,
+        "testnet": getattr(exchange_adapter, '_testnet', None),
+        "has_api_keys": bool(getattr(exchange_adapter, '_api_key', '')),
+    }
+
+
+@app.post("/api/exchange/test-connection")
+def test_exchange_connection():
+    """Test connectivity to the configured exchange.
+
+    Only meaningful in testnet/live mode. In paper mode returns OK immediately.
+    """
+    mode = exchange_adapter.mode
+    if mode == "paper":
+        return {"status": "ok", "mode": "paper", "message": "Paper mode — no exchange connection needed"}
+
+    try:
+        balance = exchange_adapter.get_balance(
+            type('FakeAgent', (), {'portfolio': [], 'current_balance': 0})()
+        )
+        return {
+            "status": "ok",
+            "mode": mode,
+            "balance": {
+                "total": balance.total,
+                "available": balance.available,
+                "margin_used": balance.margin_used,
+                "unrealized_pnl": balance.unrealized_pnl,
+                "assets": balance.assets,
+            },
+            "message": f"Connected to Binance Futures ({'testnet' if mode == 'testnet' else 'mainnet'})",
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "mode": mode,
+            "message": str(exc),
+        }
+
+
+# ── Kill Switch ───────────────────────────────────────────────────────────
+
+@app.post("/api/exchange/kill-switch")
+def kill_switch(db: Session = Depends(get_db)):
+    """EMERGENCY: Close ALL positions across ALL agents immediately.
+
+    Works in any execution mode. In testnet/live, also sends market close
+    orders to the exchange.
+    """
+    with _trading_lock:
+        agents = db.query(TradingAgent).filter(
+            TradingAgent.status == "active"
+        ).all()
+
+        total_closed = 0
+        errors = []
+
+        for agent in agents:
+            db.refresh(agent)
+            positions = [p for p in agent.portfolio if p.amount > 0]
+            for pos in positions:
+                try:
+                    current_price = market_service.get_coin_price(pos.cryptocurrency)
+                    if not current_price:
+                        current_price = pos.current_price or pos.avg_buy_price
+                    trading_service._close_position(
+                        agent, pos, current_price, db,
+                        reason="🚨 KILL SWITCH — emergency close",
+                        strategy_key=agent.strategy or "confluence_master",
+                    )
+                    total_closed += 1
+                except Exception as exc:
+                    errors.append({
+                        "agent": agent.name,
+                        "coin": pos.cryptocurrency,
+                        "error": str(exc),
+                    })
+
+    # Refresh reactive watchlist after mass close
+    if reactive_monitor:
+        reactive_monitor.refresh()
+
+    logger.warning(
+        f"🚨 KILL SWITCH activated — closed {total_closed} position(s), "
+        f"{len(errors)} error(s)"
+    )
+
+    return {
+        "status": "executed",
+        "positions_closed": total_closed,
+        "errors": errors,
+    }
 
 def _repair_agent_balances():
     """Replay all trades to detect and fix agent balances corrupted by
@@ -1102,8 +1287,8 @@ async def run_backtest(req: BacktestRequest):
     if req.coin not in ["bitcoin", "ethereum", "binancecoin", "cardano",
                         "solana", "ripple", "polkadot", "dogecoin"]:
         raise HTTPException(status_code=400, detail=f"Unsupported coin: {req.coin}")
-    if req.period_days not in [1, 3, 7, 14, 30, 90, 180, 365]:
-        raise HTTPException(status_code=400, detail="Period must be 7, 14, 30, 90, 180, or 365 days")
+    if not (1 <= req.period_days <= 365):
+        raise HTTPException(status_code=400, detail="Period must be between 1 and 365 days")
     if req.initial_balance < 50:
         raise HTTPException(status_code=400, detail="Minimum balance is $50")
 

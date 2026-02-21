@@ -231,6 +231,24 @@ class Indicators:
         current = ohlc[-1]["close"]
         return (a / current * 100) if current > 0 else None
 
+    # ── ATR Volatility Ratio ────────────────────────────────────────────
+
+    @staticmethod
+    def atr_volatility_ratio(
+        ohlc: List[Dict], fast_period: int = 5, slow_period: int = 20,
+    ) -> Optional[float]:
+        """Ratio of fast ATR to slow ATR.
+
+        Values > 1.5 indicate a volatility spike; > 2.5 signals irrational
+        moves (flash crashes, liquidation cascades) where spreads widen
+        and slippage destroys scalper R:R.
+        """
+        fast = Indicators.atr(ohlc, fast_period)
+        slow = Indicators.atr(ohlc, slow_period)
+        if fast is None or slow is None or slow <= 0:
+            return None
+        return fast / slow
+
     # ── ADX ─────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -470,6 +488,156 @@ class Indicators:
             "resistance_count": len(resistances),
         }
 
+    # ── Candlestick Patterns ───────────────────────────────────────────────
+
+    @staticmethod
+    def candlestick_patterns(ohlc: List[Dict]) -> Optional[Dict]:
+        """Detect actionable candlestick patterns from recent bars.
+
+        Patterns detected:
+          • Bullish/Bearish Engulfing (2-bar reversal)
+          • Hammer / Shooting Star (1-bar reversal)
+          • Pin Bar (1-bar rejection wick)
+          • Three White Soldiers / Three Black Crows (3-bar momentum)
+
+        Returns dict with pattern name, direction, and strength (1-3).
+        """
+        if len(ohlc) < 4:
+            return None
+
+        c0, c1, c2 = ohlc[-1], ohlc[-2], ohlc[-3]
+        o0, h0, l0, cl0 = c0["open"], c0["high"], c0["low"], c0["close"]
+        o1, h1, l1, cl1 = c1["open"], c1["high"], c1["low"], c1["close"]
+        o2, h2, l2, cl2 = c2["open"], c2["high"], c2["low"], c2["close"]
+
+        body0 = abs(cl0 - o0)
+        body1 = abs(cl1 - o1)
+        range0 = h0 - l0 if h0 > l0 else 0.001
+        range1 = h1 - l1 if h1 > l1 else 0.001
+
+        patterns: List[Dict] = []
+
+        # ── Engulfing ──────────────────────────────────────────────
+        # Bullish: prev bearish body fully engulfed by current bullish
+        if cl1 < o1 and cl0 > o0 and o0 <= cl1 and cl0 >= o1:
+            patterns.append({
+                "name": "bullish_engulfing",
+                "direction": "long",
+                "strength": 2 if body0 > body1 * 1.5 else 1,
+            })
+        # Bearish: prev bullish body fully engulfed by current bearish
+        if cl1 > o1 and cl0 < o0 and o0 >= cl1 and cl0 <= o1:
+            patterns.append({
+                "name": "bearish_engulfing",
+                "direction": "short",
+                "strength": 2 if body0 > body1 * 1.5 else 1,
+            })
+
+        # ── Hammer / Shooting Star ─────────────────────────────────
+        upper_wick0 = h0 - max(o0, cl0)
+        lower_wick0 = min(o0, cl0) - l0
+
+        # Hammer: small body at top, long lower wick (≥2× body)
+        if body0 > 0 and lower_wick0 >= body0 * 2 and upper_wick0 < body0 * 0.5:
+            patterns.append({
+                "name": "hammer",
+                "direction": "long",
+                "strength": 2 if lower_wick0 >= body0 * 3 else 1,
+            })
+        # Shooting star: small body at bottom, long upper wick
+        if body0 > 0 and upper_wick0 >= body0 * 2 and lower_wick0 < body0 * 0.5:
+            patterns.append({
+                "name": "shooting_star",
+                "direction": "short",
+                "strength": 2 if upper_wick0 >= body0 * 3 else 1,
+            })
+
+        # ── Pin Bar (rejection wick ≥ 66% of total range) ─────────
+        if range0 > 0:
+            if lower_wick0 / range0 >= 0.66 and body0 / range0 < 0.25:
+                patterns.append({
+                    "name": "bullish_pin_bar",
+                    "direction": "long",
+                    "strength": 2,
+                })
+            elif upper_wick0 / range0 >= 0.66 and body0 / range0 < 0.25:
+                patterns.append({
+                    "name": "bearish_pin_bar",
+                    "direction": "short",
+                    "strength": 2,
+                })
+
+        # ── Three White Soldiers / Three Black Crows ───────────────
+        c3 = ohlc[-4] if len(ohlc) >= 4 else None
+        if c3:
+            o3, cl3 = c3["open"], c3["close"]
+            all_bull = (cl2 > o2 and cl1 > o1 and cl0 > o0
+                        and cl0 > cl1 > cl2
+                        and o0 > o1)
+            all_bear = (cl2 < o2 and cl1 < o1 and cl0 < o0
+                        and cl0 < cl1 < cl2
+                        and o0 < o1)
+            if all_bull:
+                patterns.append({
+                    "name": "three_white_soldiers",
+                    "direction": "long",
+                    "strength": 3,
+                })
+            if all_bear:
+                patterns.append({
+                    "name": "three_black_crows",
+                    "direction": "short",
+                    "strength": 3,
+                })
+
+        if not patterns:
+            return None
+
+        # Return the strongest pattern
+        best = max(patterns, key=lambda p: p["strength"])
+        return {
+            "pattern": best["name"],
+            "direction": best["direction"],
+            "strength": best["strength"],
+            "all_patterns": [p["name"] for p in patterns],
+        }
+
+    # ── VWAP (Volume-Weighted Average Price) ────────────────────────────
+
+    @staticmethod
+    def vwap(ohlc: List[Dict], period: int = 20) -> Optional[Dict]:
+        """VWAP over last N bars + distance from current price.
+
+        VWAP acts as institutional equilibrium price. Price above VWAP
+        = bullish bias, below = bearish bias. Distance from VWAP
+        indicates overextension.
+        """
+        if len(ohlc) < period:
+            return None
+
+        recent = ohlc[-period:]
+        cum_vol = 0.0
+        cum_pv = 0.0
+        for bar in recent:
+            typical = (bar["high"] + bar["low"] + bar["close"]) / 3
+            vol = bar.get("volume", 0)
+            cum_pv += typical * vol
+            cum_vol += vol
+
+        if cum_vol <= 0:
+            return None
+
+        vwap_val = cum_pv / cum_vol
+        current = ohlc[-1]["close"]
+        dist_pct = (current - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0
+
+        return {
+            "vwap": vwap_val,
+            "distance_pct": dist_pct,
+            "above": current > vwap_val,
+            "below": current < vwap_val,
+        }
+
     # ── Higher-Timeframe Context (MTF summary) ──────────────────────────
 
     @staticmethod
@@ -621,5 +789,17 @@ class Indicators:
         # ── Order Flow Imbalance ────────────────────
         ofi_period = p.get("ofi_period", 10)
         result["ofi"] = Indicators.ofi(ohlc, ofi_period)
+
+        # ── ATR Volatility Ratio (spike detector) ──
+        result["atr_volatility_ratio"] = Indicators.atr_volatility_ratio(
+            ohlc, fast_period=5, slow_period=atr_period,
+        )
+
+        # ── Candlestick Patterns (V5) ──────────────
+        result["candle_pattern"] = Indicators.candlestick_patterns(ohlc)
+
+        # ── VWAP (V5) ─────────────────────────────
+        vwap_period = p.get("vwap_period", 20)
+        result["vwap"] = Indicators.vwap(ohlc, vwap_period)
 
         return result

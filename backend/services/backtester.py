@@ -60,9 +60,9 @@ SLIPPAGE_PCT = 0.05      # 0.05% adverse slippage on entries & SL exits
 # Professional desks use 2-5%; we use 3% as a safe default.
 CIRCUIT_BREAKER_DAILY_LOSS_PCT = 3.0  # halt trading after 3% daily loss
 
-# Volatility filter: pause entries when ATR spikes above N× its rolling mean.
-# Prevents trading during flash crashes, news bombs, and abnormal spreads.
-VOLATILITY_SPIKE_MULT = 2.5  # ATR > 2.5× rolling average = volatility spike
+# Volatility filter: V5 scalpers handle this internally via
+# volatility_block_atr_mult in ScalperParams — no backtester-level override.
+# Non-scalper strategies don't use volatility gating at the backtester level.
 
 # Interval → hours per candle (for funding rate calculation)
 _INTERVAL_HOURS = {
@@ -393,9 +393,8 @@ class Backtester:
         last_day_str = klines[warmup]["timestamp"][:10]  # "YYYY-MM-DD"
         circuit_breaker_active = False
 
-        # --- Volatility filter: rolling ATR mean for spike detection ---
-        atr_history: List[float] = []
-        atr_rolling_len = 50  # rolling window for ATR mean
+        # Volatility filter: V5 scalpers handle this internally.
+        # No backtester-level ATR spike gating needed.
 
         # --- MTF: Pre-compute resampled candles for higher timeframe ---
         mtf_cfg = _MTF_CONFIG.get(strategy_key)
@@ -488,17 +487,9 @@ class Backtester:
                 if daily_pnl_pct < -CIRCUIT_BREAKER_DAILY_LOSS_PCT:
                     circuit_breaker_active = True
 
-            # --- Volatility filter: detect ATR spikes ---
-            volatility_spike = False
-            cur_atr_pct = indicators.get("atr_pct")
-            if cur_atr_pct and strategy_key.startswith("scalper"):
-                atr_history.append(cur_atr_pct)
-                if len(atr_history) > atr_rolling_len:
-                    atr_history.pop(0)
-                if len(atr_history) >= 20:
-                    atr_mean = sum(atr_history) / len(atr_history)
-                    if cur_atr_pct > atr_mean * VOLATILITY_SPIKE_MULT:
-                        volatility_spike = True
+            # Volatility filtering delegated to V5 strategy internals.
+            # Strategy returns confidence=0 on volatility blocks,
+            # which the min_confidence check below already catches.
 
             # --- Compute MTF (higher-timeframe) context ---
             mtf_context = None
@@ -538,8 +529,7 @@ class Backtester:
             if position is None and signal.direction in ("long", "short"):
                 if (cooldown_left <= 0
                         and signal.confidence >= cfg.min_confidence
-                        and not circuit_breaker_active
-                        and not volatility_spike):
+                        and not circuit_breaker_active):
                     result = self._open_position(
                         signal, close, leverage, strategy_key,
                         balance, ts, trades, trailing_enabled

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 __all__ = [
     "MakerExecutionManager", "MakerConfig", "MakerOrder", "OrderStatus",
-    "ExchangeAdapter", "PaperExchangeAdapter",
+    "ExchangeAdapter", "PaperExchangeAdapter", "CCXTExchangeAdapter",
     "OrderResult", "PositionInfo", "BalanceInfo",
 ]
 
@@ -20,3 +20,4 @@ from backend.services.execution.exchange_adapter import (
     BalanceInfo,
 )
 from backend.services.execution.paper_adapter import PaperExchangeAdapter
+from backend.services.execution.ccxt_adapter import CCXTExchangeAdapter

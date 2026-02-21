@@ -273,6 +273,13 @@ Ejemplos:
         coins = ["bitcoin"]
         periods = [90]
 
+    # Max days per scalper variant — aligned with backtester._SCALPER_INTERVALS caps.
+    # The backtester will clamp to its own max, so sending ≥ its cap is safe.
+    _SCALPER_MAX_DAYS = {
+        "scalper_1m": 3, "scalper_3m": 14, "scalper_5m": 30,
+        "scalper_15m": 90, "scalper": 90,
+    }
+
     # Modo scalpers: cada variante con su periodo máximo natural
     if args.scalpers:
         strategies = ["scalper_1m", "scalper_3m", "scalper_5m", "scalper_15m", "scalper"]
@@ -283,10 +290,6 @@ Ejemplos:
 
     # Recalcular total_tests
     if args.scalpers:
-        _SCALPER_MAX_DAYS = {
-            "scalper_1m": 7, "scalper_3m": 30, "scalper_5m": 30,
-            "scalper_15m": 90, "scalper": 90,
-        }
         total_tests = sum(len(coins) for s in strategies)
     else:
         total_tests = len(strategies) * len(coins) * len(periods)
@@ -299,12 +302,6 @@ Ejemplos:
     print(f"  Trailing:    {'ON' if trailing_enabled else 'OFF'}")
     print(f"  Total tests: {total_tests}")
     print(f"{'═' * 65}\n")
-
-    # Max days per scalper variant
-    _SCALPER_MAX_DAYS = {
-        "scalper_1m": 3, "scalper_3m": 14, "scalper_5m": 30,
-        "scalper_15m": 30, "scalper": 30,
-    }
 
     all_results = []
     done = 0
