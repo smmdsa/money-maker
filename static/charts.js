@@ -27,10 +27,33 @@ const Charts = (() => {
 
     let lastOhlcData = [];   // Keep reference to last loaded OHLC data
 
+    // ── Position overlay state ───────────────────────────────────────────
+    let _entryLine = null;
+    let _slLine = null;
+    let _tpLine = null;
+    let _posOverlay = null;  // { entry, sl, tp, isLong, amount, margin }
+
     const CHART_BG = '#ffffff';
     const GRID_COLOR = '#f0f0f0';
     const CANDLE_UP = '#26a69a';
     const CANDLE_DOWN = '#ef5350';
+
+    const THEMES = {
+        light: {
+            bg: '#ffffff',
+            grid: '#f0f0f0',
+            text: '#666',
+            border: '#e0e0e0',
+        },
+        dark: {
+            bg: '#161b22',
+            grid: '#21262d',
+            text: '#8b949e',
+            border: '#30363d',
+        },
+    };
+
+    let _currentTheme = 'light';
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -116,17 +139,18 @@ const Charts = (() => {
     }
 
     function chartLayoutOptions(height) {
+        const t = THEMES[_currentTheme] || THEMES.light;
         return {
             height: height,
-            layout: { background: { color: CHART_BG }, textColor: '#666' },
+            layout: { background: { color: t.bg }, textColor: t.text },
             grid: {
-                vertLines: { color: GRID_COLOR },
-                horzLines: { color: GRID_COLOR },
+                vertLines: { color: t.grid },
+                horzLines: { color: t.grid },
             },
             crosshair: { mode: 0 },
-            rightPriceScale: { borderColor: '#e0e0e0' },
+            rightPriceScale: { borderColor: t.border },
             timeScale: {
-                borderColor: '#e0e0e0',
+                borderColor: t.border,
                 timeVisible: true,
                 secondsVisible: false,
             },
@@ -417,7 +441,8 @@ const Charts = (() => {
 
     function showChartMessage(containerId, msg) {
         const el = document.getElementById(containerId);
-        if (el) el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-style:italic;">${msg}</div>`;
+        const c = _currentTheme === 'dark' ? '#6e7681' : '#999';
+        if (el) el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:${c};font-style:italic;">${msg}</div>`;
     }
 
     // CoinGecko ID → display symbol for chart title
@@ -447,6 +472,86 @@ const Charts = (() => {
             } else {
                 btn.classList.toggle('active', btn.dataset.days && parseInt(btn.dataset.days) === days);
             }
+        });
+    }
+
+    // ── Position Overlay ─────────────────────────────────────────────────
+
+    function clearPositionOverlay() {
+        if (candlestickSeries) {
+            if (_entryLine) { try { candlestickSeries.removePriceLine(_entryLine); } catch(e){} _entryLine = null; }
+            if (_slLine)    { try { candlestickSeries.removePriceLine(_slLine);    } catch(e){} _slLine = null; }
+            if (_tpLine)    { try { candlestickSeries.removePriceLine(_tpLine);    } catch(e){} _tpLine = null; }
+        }
+        _posOverlay = null;
+    }
+
+    function _fmtPriceShort(price) {
+        if (price >= 1000) return price.toFixed(2);
+        if (price >= 100)  return price.toFixed(2);
+        if (price >= 10)   return price.toFixed(3);
+        if (price >= 1)    return price.toFixed(4);
+        if (price >= 0.01) return price.toFixed(5);
+        return price.toFixed(6);
+    }
+
+    function setPositionOverlay(pos) {
+        clearPositionOverlay();
+        if (!pos || !candlestickSeries) return;
+
+        const entry = pos.entry;
+        const sl = pos.sl;
+        const tp = pos.tp;
+        const isLong = pos.isLong;
+
+        _posOverlay = pos;
+
+        // Entry line (blue) — label includes PnL
+        if (entry > 0) {
+            _entryLine = candlestickSeries.createPriceLine({
+                price: entry,
+                color: '#2196F3',
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle.Solid,
+                axisLabelVisible: true,
+                title: `Entry $${_fmtPriceShort(entry)}`,
+            });
+        }
+
+        // Stop Loss line (red)
+        if (sl > 0) {
+            _slLine = candlestickSeries.createPriceLine({
+                price: sl,
+                color: '#f44336',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: `SL $${_fmtPriceShort(sl)}`,
+            });
+        }
+
+        // Take Profit line (green)
+        if (tp > 0) {
+            _tpLine = candlestickSeries.createPriceLine({
+                price: tp,
+                color: '#4caf50',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: `TP $${_fmtPriceShort(tp)}`,
+            });
+        }
+    }
+
+    function updatePositionPnL(livePrice) {
+        if (!_posOverlay || !_entryLine || !livePrice) return;
+        const { entry, isLong, amount, margin } = _posOverlay;
+        const diff = isLong ? (livePrice - entry) : (entry - livePrice);
+        const pnl = diff * amount;
+        const pnlPct = margin > 0 ? (pnl / margin) * 100 : 0;
+        const sign = pnl >= 0 ? '+' : '';
+        _entryLine.applyOptions({
+            title: `Entry $${_fmtPriceShort(entry)} | ${sign}$${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)`,
         });
     }
 
@@ -486,5 +591,24 @@ const Charts = (() => {
             // Update in-memory reference too
             lastOhlcData[lastOhlcData.length - 1] = updated;
             candlestickSeries.update(updated);
-        },    };
+        },
+        // Position overlay API
+        setPositionOverlay,
+        clearPositionOverlay,
+        updatePositionPnL,
+
+        // Theme API
+        applyTheme(theme) {
+            _currentTheme = (theme === 'dark') ? 'dark' : 'light';
+            if (candlestickChart) {
+                candlestickChart.applyOptions(chartLayoutOptions(380));
+            }
+            if (rsiChart) {
+                rsiChart.applyOptions(chartLayoutOptions(150));
+            }
+            if (equityChart) {
+                equityChart.applyOptions(chartLayoutOptions(200));
+            }
+        },
+    };
 })();

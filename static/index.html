@@ -5,6 +5,141 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Money Maker - AI Trading Dashboard</title>
     <style>
+        /* ── Theme Variables ──────────────────────────────────── */
+        :root {
+            --bg-body: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --bg-card: #ffffff;
+            --bg-card-hover: #f8f9fa;
+            --bg-card-selected: #e8eaf6;
+            --bg-input: #fff;
+            --bg-table-header: #f8f9fa;
+            --bg-log-item: #f8f9fa;
+            --bg-price-card: #f8f9fa;
+            --bg-modal: rgba(0, 0, 0, 0.5);
+            --bg-modal-content: white;
+            --bg-countdown-bar: #e0e0e0;
+            --bg-progress-track: #e0e0e0;
+            --bg-tf-btn: #f8f9fa;
+            --bg-tf-separator: #ccc;
+            --bg-pos-card: #f8f9fa;
+            --bg-strategy-card: transparent;
+            --bg-strategy-card-sel: #f0f0ff;
+            --bg-api-endpoint: #fff;
+            --bg-api-header-hover: #f8f9ff;
+            --bg-api-params-th: #f4f5fb;
+            --bg-filter-btn: #fff;
+            --bg-clickable-hover: #eef1ff;
+            --bg-badge-strategy: #ede7f6;
+            --bg-badge-long: #e8f5e9;
+            --bg-badge-short: #fce4ec;
+            --bg-badge-leverage: #fff3e0;
+            --bg-badge-info: #e3f2fd;
+            --bg-status-active: #d4edda;
+            --bg-status-paused: #fff3cd;
+            --bg-status-stopped: #f8d7da;
+            --bg-slider-track: #ccc;
+            --bg-nav: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            --bg-footer: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+
+            --text-primary: #333;
+            --text-secondary: #666;
+            --text-tertiary: #999;
+            --text-muted: #888;
+            --text-label: #555;
+            --text-on-card: #333;
+
+            --border-light: #e0e0e0;
+            --border-input: #ddd;
+            --border-card: #eee;
+            --border-table: #e0e0e0;
+            --border-api: #e0e4ea;
+
+            --accent: #667eea;
+            --accent-hover: #5568d3;
+            --accent-light: rgba(102, 126, 234, 0.1);
+
+            --profit: #27ae60;
+            --loss: #e74c3c;
+            --sl-color: #c62828;
+            --tp-color: #2e7d32;
+            --liq-color: #e65100;
+
+            --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --shadow-card-hover: 0 2px 8px rgba(102, 126, 234, 0.15);
+
+            --chart-bg: #ffffff;
+            --chart-grid: #f0f0f0;
+            --chart-text: #666;
+            --chart-border: #e0e0e0;
+        }
+
+        [data-theme="dark"] {
+            --bg-body: #0d1117;
+            --bg-card: #161b22;
+            --bg-card-hover: #1c2333;
+            --bg-card-selected: #1f2a3d;
+            --bg-input: #0d1117;
+            --bg-table-header: #1c2333;
+            --bg-log-item: #1c2333;
+            --bg-price-card: #1c2333;
+            --bg-modal: rgba(0, 0, 0, 0.7);
+            --bg-modal-content: #161b22;
+            --bg-countdown-bar: #30363d;
+            --bg-progress-track: #30363d;
+            --bg-tf-btn: #21262d;
+            --bg-tf-separator: #30363d;
+            --bg-pos-card: #1c2333;
+            --bg-strategy-card: transparent;
+            --bg-strategy-card-sel: #1f2a3d;
+            --bg-api-endpoint: #161b22;
+            --bg-api-header-hover: #1c2333;
+            --bg-api-params-th: #1c2333;
+            --bg-filter-btn: #21262d;
+            --bg-clickable-hover: #1f2a3d;
+            --bg-badge-strategy: rgba(94, 53, 177, 0.2);
+            --bg-badge-long: rgba(46, 125, 50, 0.2);
+            --bg-badge-short: rgba(198, 40, 40, 0.2);
+            --bg-badge-leverage: rgba(230, 81, 0, 0.2);
+            --bg-badge-info: rgba(33, 150, 243, 0.15);
+            --bg-status-active: rgba(46, 125, 50, 0.2);
+            --bg-status-paused: rgba(133, 100, 4, 0.2);
+            --bg-status-stopped: rgba(198, 40, 40, 0.2);
+            --bg-slider-track: #30363d;
+            --bg-nav: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+            --bg-footer: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-tertiary: #6e7681;
+            --text-muted: #6e7681;
+            --text-label: #8b949e;
+            --text-on-card: #e6edf3;
+
+            --border-light: #30363d;
+            --border-input: #30363d;
+            --border-card: #30363d;
+            --border-table: #21262d;
+            --border-api: #30363d;
+
+            --accent: #667eea;
+            --accent-hover: #7b8ff0;
+            --accent-light: rgba(102, 126, 234, 0.15);
+
+            --profit: #3fb950;
+            --loss: #f85149;
+            --sl-color: #f85149;
+            --tp-color: #3fb950;
+            --liq-color: #d29922;
+
+            --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);
+            --shadow-card-hover: 0 2px 8px rgba(102, 126, 234, 0.25);
+
+            --chart-bg: #161b22;
+            --chart-grid: #21262d;
+            --chart-text: #8b949e;
+            --chart-border: #30363d;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -13,14 +148,18 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-body);
+            color: var(--text-primary);
             min-height: 100vh;
             padding: 0;
+        }
+        [data-theme="dark"] body {
+            background: var(--bg-body);
         }
 
         /* ── Top Navigation Bar ────────────────────────────────── */
         .top-nav {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: var(--bg-nav);
             padding: 0 30px;
             display: flex;
             align-items: center;
@@ -78,14 +217,14 @@
         }
 
         .form-group { display: flex; flex-direction: column; gap: 5px; }
-        .form-group label { font-size: 0.85em; font-weight: 600; color: #555; }
+        .form-group label { font-size: 0.85em; font-weight: 600; color: var(--text-label); }
         .form-group select, .form-group input[type="number"] {
-            background: #fff; font-size: 0.95em;
+            background: var(--bg-input); color: var(--text-primary); font-size: 0.95em;
         }
         #btMetricsGrid {
             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
         }
-        .portfolio-table th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; }
+        .portfolio-table th { position: sticky; top: 0; background: var(--bg-table-header); z-index: 1; }
         
         .container {
             max-width: 1400px;
@@ -93,21 +232,21 @@
         }
         
         header {
-            background: white;
+            background: var(--bg-card);
             padding: 20px 30px;
             border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            box-shadow: var(--shadow-card);
             margin-bottom: 20px;
         }
         
         h1 {
-            color: #333;
+            color: var(--text-primary);
             font-size: 2em;
             margin-bottom: 5px;
         }
         
         .subtitle {
-            color: #666;
+            color: var(--text-secondary);
             font-size: 0.9em;
         }
         
@@ -119,22 +258,23 @@
         }
         
         .card {
-            background: white;
+            background: var(--bg-card);
+            color: var(--text-on-card);
             padding: 20px;
             border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            box-shadow: var(--shadow-card);
         }
         
         .card h2 {
-            color: #333;
+            color: var(--text-primary);
             font-size: 1.3em;
             margin-bottom: 15px;
-            border-bottom: 2px solid #667eea;
+            border-bottom: 2px solid var(--accent);
             padding-bottom: 10px;
         }
         
         .btn {
-            background: #667eea;
+            background: var(--accent);
             color: white;
             border: none;
             padding: 10px 20px;
@@ -145,7 +285,7 @@
         }
         
         .btn:hover {
-            background: #5568d3;
+            background: var(--accent-hover);
         }
         
         .btn-danger {
@@ -177,16 +317,18 @@
         label {
             display: block;
             margin-bottom: 5px;
-            color: #555;
+            color: var(--text-label);
             font-weight: 500;
         }
         
         input, select {
             width: 100%;
             padding: 8px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-input);
             border-radius: 5px;
             font-size: 1em;
+            background: var(--bg-input);
+            color: var(--text-primary);
         }
         
         .agent-list {
@@ -196,7 +338,7 @@
         
         .agent-item {
             padding: 15px;
-            border: 1px solid #e0e0e0;
+            border: 1px solid var(--border-light);
             border-radius: 5px;
             margin-bottom: 10px;
             cursor: pointer;
@@ -204,19 +346,19 @@
         }
         
         .agent-item:hover {
-            background: #f8f9fa;
-            border-color: #667eea;
+            background: var(--bg-card-hover);
+            border-color: var(--accent);
         }
         
         .agent-item.selected {
-            background: #e8eaf6;
-            border-color: #667eea;
+            background: var(--bg-card-selected);
+            border-color: var(--accent);
         }
         
         .agent-name {
             font-weight: 600;
             font-size: 1.1em;
-            color: #333;
+            color: var(--text-primary);
             margin-bottom: 5px;
         }
         
@@ -224,17 +366,17 @@
             display: flex;
             justify-content: space-between;
             font-size: 0.9em;
-            color: #666;
+            color: var(--text-secondary);
             margin-top: 10px;
         }
         
         .profit {
-            color: #27ae60;
+            color: var(--profit);
             font-weight: 600;
         }
         
         .loss {
-            color: #e74c3c;
+            color: var(--loss);
             font-weight: 600;
         }
         
@@ -247,19 +389,22 @@
         }
         
         .status-active {
-            background: #d4edda;
+            background: var(--bg-status-active);
             color: #155724;
         }
+        [data-theme="dark"] .status-active { color: #69f0ae; }
         
         .status-paused {
-            background: #fff3cd;
+            background: var(--bg-status-paused);
             color: #856404;
         }
+        [data-theme="dark"] .status-paused { color: #ffcc80; }
         
         .status-stopped {
-            background: #f8d7da;
+            background: var(--bg-status-stopped);
             color: #721c24;
         }
+        [data-theme="dark"] .status-stopped { color: #ff8a80; }
         
         .trade-log, .decision-log, .news-feed {
             max-height: 400px;
@@ -268,20 +413,20 @@
         
         .log-item {
             padding: 10px;
-            border-left: 3px solid #667eea;
-            background: #f8f9fa;
+            border-left: 3px solid var(--accent);
+            background: var(--bg-log-item);
             margin-bottom: 10px;
             border-radius: 3px;
         }
         
         .log-time {
             font-size: 0.85em;
-            color: #999;
+            color: var(--text-tertiary);
         }
         
         .log-content {
             margin-top: 5px;
-            color: #333;
+            color: var(--text-primary);
         }
         
         .market-prices {
@@ -294,7 +439,7 @@
         
         .price-card {
             padding: 10px;
-            background: #f8f9fa;
+            background: var(--bg-price-card);
             border-radius: 5px;
             text-align: center;
             cursor: pointer;
@@ -302,20 +447,20 @@
             border: 1px solid transparent;
         }
         .price-card:hover {
-            border-color: #667eea;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+            border-color: var(--accent);
+            box-shadow: var(--shadow-card-hover);
             transform: translateY(-1px);
         }
         
         .coin-name {
             font-weight: 600;
-            color: #333;
+            color: var(--text-primary);
             margin-bottom: 5px;
         }
         
         .coin-price {
             font-size: 1.2em;
-            color: #667eea;
+            color: var(--accent);
             font-weight: 700;
         }
         
@@ -327,7 +472,7 @@
         .funding-rate {
             font-size: 0.75em;
             margin-top: 3px;
-            color: #999;
+            color: var(--text-tertiary);
         }
         .funding-rate .fr-value {
             font-weight: 600;
@@ -353,18 +498,19 @@
         }
         
         .modal-content {
-            background: white;
+            background: var(--bg-modal-content);
             padding: 30px;
             border-radius: 10px;
             max-width: 500px;
             width: 90%;
+            color: var(--text-primary);
         }
         
         .close-btn {
             float: right;
             font-size: 1.5em;
             cursor: pointer;
-            color: #999;
+            color: var(--text-tertiary);
         }
         
         .portfolio-table {
@@ -377,25 +523,26 @@
         .portfolio-table td {
             padding: 10px;
             text-align: left;
-            border-bottom: 1px solid #e0e0e0;
+            border-bottom: 1px solid var(--border-table);
+            color: var(--text-primary);
         }
         
         .portfolio-table th {
-            background: #f8f9fa;
+            background: var(--bg-table-header);
             font-weight: 600;
-            color: #555;
+            color: var(--text-label);
         }
         
         .loading {
             text-align: center;
             padding: 20px;
-            color: #999;
+            color: var(--text-tertiary);
         }
         
         .empty {
             text-align: center;
             padding: 20px;
-            color: #999;
+            color: var(--text-tertiary);
             font-style: italic;
         }
 
@@ -404,7 +551,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 2px solid #667eea;
+            border-bottom: 2px solid var(--accent);
             padding-bottom: 10px;
             margin-bottom: 15px;
         }
@@ -420,21 +567,21 @@
             align-items: center;
             gap: 6px;
             font-size: 0.82em;
-            color: #888;
+            color: var(--text-muted);
             font-variant-numeric: tabular-nums;
         }
 
         .countdown-bar {
             width: 60px;
             height: 5px;
-            background: #e0e0e0;
+            background: var(--bg-countdown-bar);
             border-radius: 3px;
             overflow: hidden;
         }
 
         .countdown-bar-fill {
             height: 100%;
-            background: #667eea;
+            background: var(--accent);
             border-radius: 3px;
             transition: width 1s linear;
         }
@@ -495,11 +642,11 @@
         }
         .log-item.clickable:hover {
             border-left-color: #00d2ff;
-            background: #eef1ff;
+            background: var(--bg-clickable-hover);
         }
         .log-item.clickable .click-hint {
             font-size: 0.75em;
-            color: #999;
+            color: var(--text-tertiary);
             margin-top: 4px;
         }
 
@@ -749,7 +896,7 @@
         .th-empty {
             text-align: center;
             padding: 40px 20px;
-            color: #666;
+            color: var(--text-muted);
             font-style: italic;
         }
         .th-badge-open { background: #1a237e; color: #82b1ff; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: 600; }
@@ -757,20 +904,20 @@
 
         /* News links */
         .news-link {
-            color: #333;
+            color: var(--text-primary);
             text-decoration: none;
             font-weight: 600;
             transition: color 0.2s;
         }
 
         .news-link:hover {
-            color: #667eea;
+            color: var(--accent);
             text-decoration: underline;
         }
 
         .news-source {
             font-size: 0.8em;
-            color: #999;
+            color: var(--text-tertiary);
             margin-left: 4px;
         }
 
@@ -780,10 +927,10 @@
         }
 
         .chart-card {
-            background: white;
+            background: var(--bg-card);
             padding: 20px;
             border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            box-shadow: var(--shadow-card);
             margin-bottom: 20px;
         }
 
@@ -799,23 +946,23 @@
         .chart-pair-title {
             font-size: 1.15em;
             font-weight: 700;
-            color: #333;
+            color: var(--text-primary);
             letter-spacing: 0.5px;
             padding: 4px 0;
         }
         .btn-chart-refresh {
             background: none;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-input);
             border-radius: 4px;
             cursor: pointer;
             font-size: 1em;
             padding: 3px 8px;
-            color: #666;
+            color: var(--text-secondary);
             transition: all 0.2s;
             line-height: 1;
         }
         .btn-chart-refresh:hover {
-            background: #e3f2fd;
+            background: var(--bg-badge-info);
             border-color: #2196F3;
             color: #2196F3;
         }
@@ -836,30 +983,30 @@
         .tf-separator {
             width: 1px;
             height: 20px;
-            background: #ccc;
+            background: var(--bg-tf-separator);
             margin: 0 4px;
         }
 
         .tf-btn {
             padding: 5px 10px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-input);
             border-radius: 4px;
-            background: #f8f9fa;
+            background: var(--bg-tf-btn);
             cursor: pointer;
             font-size: 0.82em;
             transition: all 0.2s;
-            color: #555;
+            color: var(--text-label);
         }
 
         .tf-btn:hover {
-            border-color: #667eea;
-            color: #667eea;
+            border-color: var(--accent);
+            color: var(--accent);
         }
 
         .tf-btn.active {
-            background: #667eea;
+            background: var(--accent);
             color: white;
-            border-color: #667eea;
+            border-color: var(--accent);
         }
 
         .chart-container {
@@ -869,7 +1016,7 @@
 
         .rsi-label {
             font-size: 0.8em;
-            color: #999;
+            color: var(--text-tertiary);
             margin: 8px 0 4px 0;
         }
 
@@ -894,8 +1041,8 @@
             border-radius: 4px;
             font-size: 0.75em;
             font-weight: 700;
-            background: #e8f5e9;
-            color: #2e7d32;
+            background: var(--bg-badge-long);
+            color: var(--tp-color);
         }
         .badge-short {
             display: inline-block;
@@ -903,8 +1050,8 @@
             border-radius: 4px;
             font-size: 0.75em;
             font-weight: 700;
-            background: #fce4ec;
-            color: #c62828;
+            background: var(--bg-badge-short);
+            color: var(--sl-color);
         }
         .badge-leverage {
             display: inline-block;
@@ -912,8 +1059,8 @@
             border-radius: 4px;
             font-size: 0.7em;
             font-weight: 700;
-            background: #fff3e0;
-            color: #e65100;
+            background: var(--bg-badge-leverage);
+            color: var(--liq-color);
         }
 
         /* ── Open Positions Section (full-width) ── */
@@ -927,12 +1074,12 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 2px solid #667eea;
+            border-bottom: 2px solid var(--accent);
             padding-bottom: 10px;
             margin-bottom: 15px;
         }
         .positions-header h2 {
-            color: #333;
+            color: var(--text-primary);
             font-size: 1.3em;
             margin: 0;
             border: none;
@@ -959,15 +1106,15 @@
         }
         .positions-sort-group .sort-label {
             font-size: 0.78em;
-            color: #888;
+            color: var(--text-muted);
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.3px;
         }
         .btn-sort {
-            background: #f0f0f0;
-            color: #555;
-            border: 1px solid #ddd;
+            background: var(--bg-pos-card);
+            color: var(--text-label);
+            border: 1px solid var(--border-input);
             padding: 4px 10px;
             border-radius: 5px;
             cursor: pointer;
@@ -976,20 +1123,20 @@
             transition: all 0.2s;
         }
         .btn-sort:hover {
-            background: #e0e0e0;
+            background: var(--bg-progress-track);
             border-color: #bbb;
         }
         .btn-sort.active {
-            background: #667eea;
+            background: var(--accent);
             color: #fff;
-            border-color: #667eea;
+            border-color: var(--accent);
         }
         .btn-sort.active:hover {
-            background: #5568d3;
+            background: var(--accent-hover);
         }
         .pos-card {
-            background: #f8f9fa;
-            border: 1px solid #e0e0e0;
+            background: var(--bg-pos-card);
+            border: 1px solid var(--border-light);
             border-radius: 10px;
             padding: 16px 20px;
             margin-bottom: 12px;
@@ -1005,7 +1152,7 @@
         .pos-card .pos-coin {
             font-size: 1.1em;
             font-weight: 700;
-            color: #333;
+            color: var(--text-primary);
         }
         .btn-chart-pos {
             background: none;
@@ -1020,10 +1167,10 @@
             opacity: 0.6;
         }
         .btn-chart-pos:hover {
-            background: #e3f2fd;
+            background: var(--bg-badge-info);
             opacity: 1;
         }
-        .pos-card .pos-meta { font-size: 0.85em; color: #666; }
+        .pos-card .pos-meta { font-size: 0.85em; color: var(--text-secondary); }
         .pos-card .pos-meta span { display: block; margin-top: 3px; }
         .pos-card .pos-prices {
             display: grid;
@@ -1034,27 +1181,28 @@
         .pos-card .pos-prices .price-label {
             font-size: 0.7em;
             text-transform: uppercase;
-            color: #999;
+            color: var(--text-tertiary);
             font-weight: 600;
         }
         .pos-card .pos-prices .price-val {
             font-size: 0.9em;
             font-weight: 600;
         }
-        .pos-card .pos-prices .price-val.sl { color: #c62828; }
-        .pos-card .pos-prices .price-val.tp { color: #2e7d32; }
-        .pos-card .pos-prices .price-val.liq { color: #e65100; }
+        .pos-card .pos-prices .price-val.sl { color: var(--sl-color); }
+        .pos-card .pos-prices .price-val.tp { color: var(--tp-color); }
+        .pos-card .pos-prices .price-val.liq { color: var(--liq-color); }
         .badge-trailing {
             display: inline-block;
             font-size: 0.65em;
             padding: 1px 5px;
             border-radius: 3px;
-            background: #e3f2fd;
+            background: var(--bg-badge-info);
             color: #1565c0;
             font-weight: 600;
             margin-left: 4px;
             vertical-align: middle;
         }
+        [data-theme="dark"] .badge-trailing { color: #82b1ff; }
         .trailing-info {
             font-size: 0.7em;
             color: #1565c0;
@@ -1086,7 +1234,7 @@
         .pos-progress-bar {
             grid-column: 1 / -1;
             height: 4px;
-            background: #e0e0e0;
+            background: var(--bg-progress-track);
             border-radius: 2px;
             position: relative;
             margin-top: 4px;
@@ -1111,11 +1259,12 @@
             border-radius: 10px;
             font-size: 0.7em;
             font-weight: 600;
-            background: #ede7f6;
+            background: var(--bg-badge-strategy);
             color: #5e35b1;
         }
+        [data-theme="dark"] .badge-strategy { color: #b39ddb; }
         .strategy-card {
-            border: 2px solid #eee;
+            border: 2px solid var(--border-card);
             border-radius: 8px;
             padding: 12px;
             margin: 6px 0;
@@ -1123,24 +1272,25 @@
             transition: all 0.2s;
         }
         .strategy-card:hover {
-            border-color: #667eea;
+            border-color: var(--accent);
         }
         .strategy-card.selected {
-            border-color: #667eea;
-            background: #f0f0ff;
+            border-color: var(--accent);
+            background: var(--bg-strategy-card-sel);
         }
         .strategy-card h4 {
             margin: 0 0 4px 0;
             font-size: 0.95em;
+            color: var(--text-primary);
         }
         .strategy-card p {
             margin: 0;
             font-size: 0.8em;
-            color: #666;
+            color: var(--text-secondary);
         }
         .strategy-card .strategy-meta {
             font-size: 0.75em;
-            color: #999;
+            color: var(--text-tertiary);
             margin-top: 4px;
         }
 
@@ -1293,16 +1443,16 @@
 
         /* ── API Docs Section ─────────────────────────────────── */
         .api-docs { max-width: 1100px; margin: 0 auto; }
-        .api-docs h2 { color: #333; margin-bottom: 8px; font-size: 1.6em; }
-        .api-docs .api-intro { color: #666; margin-bottom: 24px; font-size: 0.95em; line-height: 1.5; }
+        .api-docs h2 { color: var(--text-primary); margin-bottom: 8px; font-size: 1.6em; }
+        .api-docs .api-intro { color: var(--text-muted); margin-bottom: 24px; font-size: 0.95em; line-height: 1.5; }
         .api-docs .api-group { margin-bottom: 28px; }
         .api-docs .api-group-title {
-            font-size: 1.15em; font-weight: 700; color: #1a1a2e;
+            font-size: 1.15em; font-weight: 700; color: var(--text-primary);
             border-bottom: 2px solid #667eea; padding-bottom: 6px; margin-bottom: 14px;
             display: flex; align-items: center; gap: 8px;
         }
         .api-endpoint {
-            background: #fff; border: 1px solid #e0e4ea; border-radius: 8px;
+            background: var(--bg-card); border: 1px solid var(--border-api); border-radius: 8px;
             margin-bottom: 10px; overflow: hidden; transition: box-shadow 0.2s;
         }
         .api-endpoint:hover { box-shadow: 0 2px 12px rgba(102,126,234,0.12); }
@@ -1310,7 +1460,7 @@
             display: flex; align-items: center; gap: 12px;
             padding: 12px 16px; cursor: pointer; user-select: none;
         }
-        .api-endpoint-header:hover { background: #f8f9ff; }
+        .api-endpoint-header:hover { background: var(--bg-api-header-hover); }
         .api-method {
             display: inline-block; min-width: 62px; text-align: center;
             padding: 3px 10px; border-radius: 4px; font-size: 0.78em;
@@ -1321,22 +1471,22 @@
         .api-method.patch { background: #ff9800; }
         .api-method.delete { background: #f44336; }
         .api-method.ws { background: #9c27b0; }
-        .api-path { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.92em; color: #1a1a2e; font-weight: 600; }
-        .api-desc { color: #888; font-size: 0.85em; margin-left: auto; }
-        .api-chevron { color: #aab; font-size: 0.8em; transition: transform 0.2s; }
+        .api-path { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.92em; color: var(--text-primary); font-weight: 600; }
+        .api-desc { color: var(--text-muted); font-size: 0.85em; margin-left: auto; }
+        .api-chevron { color: var(--text-tertiary); font-size: 0.8em; transition: transform 0.2s; }
         .api-endpoint.open .api-chevron { transform: rotate(90deg); }
         .api-endpoint-body {
-            display: none; padding: 0 16px 16px; border-top: 1px solid #eee;
+            display: none; padding: 0 16px 16px; border-top: 1px solid var(--border-card);
         }
         .api-endpoint.open .api-endpoint-body { display: block; }
-        .api-detail-label { font-size: 0.8em; font-weight: 700; color: #667eea; text-transform: uppercase; margin: 12px 0 6px; letter-spacing: 0.5px; }
+        .api-detail-label { font-size: 0.8em; font-weight: 700; color: var(--accent); text-transform: uppercase; margin: 12px 0 6px; letter-spacing: 0.5px; }
         .api-params-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
-        .api-params-table th { text-align: left; padding: 6px 10px; background: #f4f5fb; color: #555; font-weight: 600; }
-        .api-params-table td { padding: 6px 10px; border-top: 1px solid #eee; }
-        .api-params-table .param-name { font-family: monospace; color: #1a1a2e; font-weight: 600; }
-        .api-params-table .param-type { color: #667eea; font-size: 0.9em; }
+        .api-params-table th { text-align: left; padding: 6px 10px; background: var(--bg-api-params-th); color: var(--text-label); font-weight: 600; }
+        .api-params-table td { padding: 6px 10px; border-top: 1px solid var(--border-card); color: var(--text-primary); }
+        .api-params-table .param-name { font-family: monospace; color: var(--text-primary); font-weight: 600; }
+        .api-params-table .param-type { color: var(--accent); font-size: 0.9em; }
         .api-params-table .param-req { color: #f44336; font-size: 0.8em; font-weight: 700; }
-        .api-params-table .param-opt { color: #999; font-size: 0.8em; }
+        .api-params-table .param-opt { color: var(--text-tertiary); font-size: 0.8em; }
         .api-response-example {
             background: #1a1a2e; color: #a8d8a8; border-radius: 6px;
             padding: 14px 16px; font-family: monospace; font-size: 0.82em;
@@ -1346,22 +1496,22 @@
             display: flex; gap: 10px; margin-bottom: 20px;
         }
         .api-search-box input {
-            flex: 1; padding: 10px 16px; border: 1px solid #ddd; border-radius: 6px;
-            font-size: 0.95em; outline: none;
+            flex: 1; padding: 10px 16px; border: 1px solid var(--border-input); border-radius: 6px;
+            font-size: 0.95em; outline: none; background: var(--bg-input); color: var(--text-primary);
         }
-        .api-search-box input:focus { border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.15); }
+        .api-search-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(102,126,234,0.15); }
         .api-filter-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
         .api-filter-btn {
-            padding: 5px 14px; border-radius: 20px; border: 1px solid #ddd;
-            background: #fff; cursor: pointer; font-size: 0.82em; font-weight: 600;
+            padding: 5px 14px; border-radius: 20px; border: 1px solid var(--border-input);
+            background: var(--bg-filter-btn); color: var(--text-primary); cursor: pointer; font-size: 0.82em; font-weight: 600;
             transition: all 0.15s;
         }
-        .api-filter-btn:hover { border-color: #667eea; color: #667eea; }
-        .api-filter-btn.active { background: #667eea; color: #fff; border-color: #667eea; }
+        .api-filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .api-filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
         /* ── Footer ───────────────────────────────────────────── */
         .app-footer {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: var(--bg-footer);
             color: #8899aa; padding: 32px 30px 20px;
             margin-top: 40px;
         }
@@ -1376,7 +1526,7 @@
             display: block; color: #8899aa; text-decoration: none;
             font-size: 0.85em; padding: 3px 0; transition: color 0.15s;
         }
-        .footer-links a:hover { color: #667eea; }
+        .footer-links a:hover { color: var(--accent); }
         .footer-bottom {
             max-width: 1400px; margin: 20px auto 0;
             padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08);
@@ -1386,6 +1536,87 @@
             .footer-inner { grid-template-columns: 1fr; gap: 20px; }
             .api-endpoint-header { flex-wrap: wrap; }
             .api-desc { margin-left: 0; width: 100%; margin-top: 4px; }
+        }
+
+        /* ── Theme Toggle Button ──────────────────────────────── */
+        .theme-toggle {
+            margin-left: auto;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 1.1em;
+            line-height: 1;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.3);
+            transform: scale(1.05);
+        }
+        .theme-icon {
+            display: inline-block;
+            transition: transform 0.3s;
+        }
+        .theme-toggle:hover .theme-icon {
+            transform: rotate(20deg);
+        }
+
+        /* ── Dark mode: modal overlay ─────────────────────────── */
+        .modal {
+            background: var(--bg-modal);
+        }
+
+        /* ── Slider track for dark mode ───────────────────────── */
+        [data-theme="dark"] input[type="range"] {
+            accent-color: var(--accent);
+        }
+        [data-theme="dark"] select option {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        /* ── Profile buttons (agent creation form) ────────────── */
+        [data-theme="dark"] .profile-btn {
+            background: var(--bg-card) !important;
+            border-color: var(--border-light) !important;
+        }
+        [data-theme="dark"] .profile-btn.selected {
+            border-color: var(--accent) !important;
+            background: rgba(102,126,234,0.15) !important;
+        }
+        [data-theme="dark"] .profile-btn div:last-child {
+            color: var(--text-tertiary) !important;
+        }
+
+        /* ── API docs dark overrides ──────────────────────────── */
+        [data-theme="dark"] .api-docs .api-group-title {
+            color: var(--text-primary);
+            border-bottom-color: var(--accent);
+        }
+        [data-theme="dark"] .api-endpoint {
+            background: var(--bg-card);
+            border-color: var(--border-light);
+        }
+        [data-theme="dark"] .api-endpoint-header:hover {
+            background: var(--bg-card-hover);
+        }
+        [data-theme="dark"] .api-detail {
+            background: var(--bg-log-item);
+            border-top-color: var(--border-light);
+        }
+        [data-theme="dark"] .api-detail code {
+            background: rgba(102,126,234,0.15);
+            color: var(--accent);
+        }
+
+        /* ── Backtesting dark overrides ───────────────────────── */
+        [data-theme="dark"] .th-empty {
+            color: var(--text-muted);
         }
     </style>
 </head>
@@ -1404,6 +1635,9 @@
                 📖 API Docs
             </a>
         </div>
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode">
+            <span class="theme-icon" id="themeIcon">🌙</span>
+        </button>
     </nav>
 
     <div class="app-body">
@@ -1443,7 +1677,7 @@
                 <div class="card-header">
                     <h2>Market Prices</h2>
                     <div style="display:flex;align-items:center;gap:10px;">
-                        <span id="dataSourceBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:#e3f2fd;color:#1565c0;font-weight:600;white-space:nowrap;"></span>
+                        <span id="dataSourceBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:var(--bg-badge-info);color:#1565c0;font-weight:600;white-space:nowrap;"></span>
                         <span id="wsBadge" style="font-size:0.7em;padding:3px 8px;border-radius:10px;background:#333;color:#888;font-weight:600;white-space:nowrap;">WS ⏳</span>
                         <div class="countdown" id="priceCountdown">
                             <span id="priceCountdownText">15s</span>
@@ -1508,7 +1742,7 @@
         <!-- ── Equity Curve ───────────────────────────────────────── -->
         <div class="equity-section" id="equitySection" style="display: none;">
             <div class="chart-card">
-                <h2 style="color:#333;font-size:1.3em;margin-bottom:15px;border-bottom:2px solid #667eea;padding-bottom:10px;">📈 Agent Equity Curve</h2>
+                <h2 style="color:var(--text-primary);font-size:1.3em;margin-bottom:15px;border-bottom:2px solid var(--accent);padding-bottom:10px;">📈 Agent Equity Curve</h2>
                 <div class="chart-container" id="equityChartContainer">
                     <div class="empty">Select an agent to view equity curve</div>
                 </div>
@@ -1558,7 +1792,7 @@
         <!-- Backtest Config -->
         <div class="card" style="margin-bottom:20px;">
             <h2 style="margin-bottom:15px;">🔙 Backtesting Engine</h2>
-            <p style="color:#666;margin-bottom:18px;font-size:0.92em;">
+            <p style="color:var(--text-muted);margin-bottom:18px;font-size:0.92em;">
                 Simulate a strategy against real historical futures data. See how it would have performed before risking capital.
             </p>
 
@@ -1566,7 +1800,7 @@
                 <!-- Strategy -->
                 <div class="form-group">
                     <label>Strategy</label>
-                    <select id="btStrategy" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                    <select id="btStrategy" style="width:100%;padding:8px;border:1px solid var(--border-light);border-radius:5px;background:var(--bg-card);color:var(--text-primary);">
                         <option value="trend_rider">Trend Rider</option>
                         <option value="mean_reversion">Mean Reversion</option>
                         <option value="momentum_sniper">Momentum Sniper</option>
@@ -1582,7 +1816,7 @@
                 <!-- Coin -->
                 <div class="form-group">
                     <label>Coin</label>
-                    <select id="btCoin" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                    <select id="btCoin" style="width:100%;padding:8px;border:1px solid var(--border-light);border-radius:5px;background:var(--bg-card);color:var(--text-primary);">
                         <option value="bitcoin">Bitcoin (BTC)</option>
                         <option value="ethereum">Ethereum (ETH)</option>
                         <option value="solana">Solana (SOL)</option>
@@ -1596,7 +1830,7 @@
                 <!-- Period -->
                 <div class="form-group">
                     <label>Period</label>
-                    <select id="btPeriod" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                    <select id="btPeriod" style="width:100%;padding:8px;border:1px solid var(--border-light);border-radius:5px;background:var(--bg-card);color:var(--text-primary);">
                         <option value="1">1 Day</option>
                         <option value="3">3 Days</option>
                         <option value="7">7 Days</option>
@@ -1617,7 +1851,7 @@
                 <div class="form-group">
                     <label>Initial Balance</label>
                     <input type="number" id="btBalance" value="10000" min="50" step="50"
-                           style="width:100%;padding:8px;border:1px solid #ddd;border-radius:5px;">
+                           style="width:100%;padding:8px;border:1px solid var(--border-light);border-radius:5px;background:var(--bg-card);color:var(--text-primary);">
                 </div>
                 <!-- Trailing Toggle -->
                 <div class="form-group">
@@ -1631,7 +1865,7 @@
             <button class="btn" id="btRunBtn" onclick="runBacktest()" style="min-width:180px;">
                 ▶ Run Backtest
             </button>
-            <span id="btStatus" style="margin-left:12px;font-size:0.88em;color:#999;"></span>
+            <span id="btStatus" style="margin-left:12px;font-size:0.88em;color:var(--text-tertiary);"></span>
         </div>
 
         <!-- Backtest Results (hidden until run) -->
@@ -1764,7 +1998,7 @@
                         <tr><td class="param-name">agent_id</td><td class="param-type">int</td><td>Agent ID</td></tr>
                     </tbody></table>
                     <div class="api-detail-label">Response</div>
-                    <p style="font-size:0.88em;color:#666">Full agent object including portfolio items with current prices, unrealized P&L, margin, leverage, SL/TP levels.</p>
+                    <p style="font-size:0.88em;color:var(--text-muted)">Full agent object including portfolio items with current prices, unrealized P&L, margin, leverage, SL/TP levels.</p>
                 </div>
             </div>
 
@@ -1896,7 +2130,7 @@
                         <tr><td class="param-name">limit</td><td class="param-type">int</td><td>50</td><td>Max decisions to return</td></tr>
                     </tbody></table>
                     <div class="api-detail-label">Response Fields</div>
-                    <p style="font-size:0.88em;color:#666">Each decision includes: reasoning, llm_reasoning, llm_sentiment_adj, confidence, indicators (JSON), strategy, news_considered.</p>
+                    <p style="font-size:0.88em;color:var(--text-muted)">Each decision includes: reasoning, llm_reasoning, llm_sentiment_adj, confidence, indicators (JSON), strategy, news_considered.</p>
                 </div>
             </div>
 
@@ -1961,7 +2195,7 @@
                 </div>
                 <div class="api-endpoint-body">
                     <div class="api-detail-label">Response</div>
-                    <p style="font-size:0.88em;color:#666">Returns NYSE, NASDAQ, London, Frankfurt, Tokyo, Shanghai, Hong Kong, Sydney with status (open/closed/pre-market), local time, and session progress %.</p>
+                    <p style="font-size:0.88em;color:var(--text-muted)">Returns NYSE, NASDAQ, London, Frankfurt, Tokyo, Shanghai, Hong Kong, Sydney with status (open/closed/pre-market), local time, and session progress %.</p>
                 </div>
             </div>
 
@@ -2042,7 +2276,7 @@
                 </div>
                 <div class="api-endpoint-body">
                     <div class="api-detail-label">Response</div>
-                    <p style="font-size:0.88em;color:#666">Returns a map of strategy keys → config objects with: name, description, style, default_leverage, max_leverage, max_positions, risk_per_trade_pct, min_confidence.</p>
+                    <p style="font-size:0.88em;color:var(--text-muted)">Returns a map of strategy keys → config objects with: name, description, style, default_leverage, max_leverage, max_positions, risk_per_trade_pct, min_confidence.</p>
                 </div>
             </div>
         </div>
@@ -2096,7 +2330,7 @@
                         <tr><td class="param-name">trailing_enabled</td><td class="param-type">bool</td><td class="param-opt">—</td><td>Enable trailing stops (default: true)</td></tr>
                     </tbody></table>
                     <div class="api-detail-label">Response</div>
-                    <p style="font-size:0.88em;color:#666">Returns full backtest metrics: total_return, win_rate, sharpe_ratio, max_drawdown, total_trades, equity_curve, and per-trade log.</p>
+                    <p style="font-size:0.88em;color:var(--text-muted)">Returns full backtest metrics: total_return, win_rate, sharpe_ratio, max_drawdown, total_trades, equity_curve, and per-trade log.</p>
                 </div>
             </div>
         </div>
@@ -2133,7 +2367,7 @@
                 </div>
                 <div class="api-endpoint-body">
                     <div class="api-detail-label">Response</div>
-                    <p style="font-size:0.88em;color:#666">Returns WebSocket connection details, subscribed streams, message counts, and latency.</p>
+                    <p style="font-size:0.88em;color:var(--text-muted)">Returns WebSocket connection details, subscribed streams, message counts, and latency.</p>
                 </div>
             </div>
 
@@ -2267,27 +2501,27 @@ ws.onmessage = (e) => {
                     <div id="profileSelector" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
                         <button type="button" class="profile-btn" data-profile="micro"
                                 onclick="applyProfile('micro', this)"
-                                style="padding:8px 4px;border:2px solid #e0e0e0;border-radius:8px;background:#fff;cursor:pointer;text-align:center;font-size:0.8em;">
+                                style="padding:8px 4px;border:2px solid var(--border-light);border-radius:8px;background:var(--bg-card);cursor:pointer;text-align:center;font-size:0.8em;">
                             <div style="font-weight:700;color:#e65100;">⚡ Micro</div>
-                            <div style="color:#999;font-size:0.85em;">$50–100</div>
+                            <div style="color:var(--text-tertiary);font-size:0.85em;">$50–100</div>
                         </button>
                         <button type="button" class="profile-btn" data-profile="small"
                                 onclick="applyProfile('small', this)"
-                                style="padding:8px 4px;border:2px solid #e0e0e0;border-radius:8px;background:#fff;cursor:pointer;text-align:center;font-size:0.8em;">
+                                style="padding:8px 4px;border:2px solid var(--border-light);border-radius:8px;background:var(--bg-card);cursor:pointer;text-align:center;font-size:0.8em;">
                             <div style="font-weight:700;color:#ff9800;">🔥 Small</div>
-                            <div style="color:#999;font-size:0.85em;">$100–500</div>
+                            <div style="color:var(--text-tertiary);font-size:0.85em;">$100–500</div>
                         </button>
                         <button type="button" class="profile-btn selected" data-profile="standard"
                                 onclick="applyProfile('standard', this)"
-                                style="padding:8px 4px;border:2px solid #667eea;border-radius:8px;background:#f0f2ff;cursor:pointer;text-align:center;font-size:0.8em;">
+                                style="padding:8px 4px;border:2px solid var(--accent);border-radius:8px;background:var(--bg-card-selected);cursor:pointer;text-align:center;font-size:0.8em;">
                             <div style="font-weight:700;color:#667eea;">📊 Standard</div>
-                            <div style="color:#999;font-size:0.85em;">$500–2k</div>
+                            <div style="color:var(--text-tertiary);font-size:0.85em;">$500–2k</div>
                         </button>
                         <button type="button" class="profile-btn" data-profile="large"
                                 onclick="applyProfile('large', this)"
-                                style="padding:8px 4px;border:2px solid #e0e0e0;border-radius:8px;background:#fff;cursor:pointer;text-align:center;font-size:0.8em;">
+                                style="padding:8px 4px;border:2px solid var(--border-light);border-radius:8px;background:var(--bg-card);cursor:pointer;text-align:center;font-size:0.8em;">
                             <div style="font-weight:700;color:#2e7d32;">🏦 Large</div>
-                            <div style="color:#999;font-size:0.85em;">$2k+</div>
+                            <div style="color:var(--text-tertiary);font-size:0.85em;">$2k+</div>
                         </button>
                     </div>
                     <div id="profileHint" style="margin-top:6px;font-size:0.8em;color:#667eea;font-style:italic;"></div>
@@ -2297,13 +2531,13 @@ ws.onmessage = (e) => {
                 <div class="form-group">
                     <label>Leverage Range</label>
                     <div style="display:flex;align-items:center;gap:10px;">
-                        <span style="font-size:0.85em;color:#666;min-width:28px;">Min</span>
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Min</span>
                         <input type="range" id="minLeverage" min="1" max="50" value="1" style="flex:1"
                                oninput="syncLeverageSliders()">
                         <span id="minLevLabel" style="font-weight:700;min-width:40px;">1x</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
-                        <span style="font-size:0.85em;color:#666;min-width:28px;">Max</span>
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Max</span>
                         <input type="range" id="maxLeverage" min="1" max="50" value="10" style="flex:1"
                                oninput="syncLeverageSliders()">
                         <span id="leverageLabel" style="font-weight:700;min-width:40px;">10x</span>
@@ -2314,18 +2548,18 @@ ws.onmessage = (e) => {
                 <div class="form-group">
                     <label>Risk per Trade (%)</label>
                     <div style="display:flex;align-items:center;gap:10px;">
-                        <span style="font-size:0.85em;color:#666;min-width:28px;">Min</span>
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Min</span>
                         <input type="range" id="riskMin" min="0" max="20" value="0" step="0.5" style="flex:1"
                                oninput="syncRiskSliders()">
                         <span id="riskMinLabel" style="font-weight:700;min-width:55px;">Auto</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
-                        <span style="font-size:0.85em;color:#666;min-width:28px;">Max</span>
+                        <span style="font-size:0.85em;color:var(--text-muted);min-width:28px;">Max</span>
                         <input type="range" id="riskMax" min="0" max="20" value="0" step="0.5" style="flex:1"
                                oninput="syncRiskSliders()">
                         <span id="riskMaxLabel" style="font-weight:700;min-width:55px;">Auto</span>
                     </div>
-                    <div style="margin-top:4px;font-size:0.75em;color:#999;">0 = use strategy default. Higher risk % = bigger positions, faster profits/losses.</div>
+                    <div style="margin-top:4px;font-size:0.75em;color:var(--text-tertiary);">0 = use strategy default. Higher risk % = bigger positions, faster profits/losses.</div>
                 </div>
 
                 <!-- Trailing Stop -->
@@ -2334,7 +2568,7 @@ ws.onmessage = (e) => {
                         <input type="checkbox" id="trailingEnabled" checked style="width:18px;height:18px;accent-color:#667eea;">
                         <span>Enable Trailing Stop Loss</span>
                     </label>
-                    <div style="margin-top:4px;font-size:0.75em;color:#999;">When enabled, stop loss follows price movement to lock in profits.</div>
+                    <div style="margin-top:4px;font-size:0.75em;color:var(--text-tertiary);">When enabled, stop loss follows price movement to lock in profits.</div>
                 </div>
 
                 <div class="form-group">
@@ -2352,6 +2586,40 @@ ws.onmessage = (e) => {
     <script src="/static/charts.js"></script>
 
     <script>
+        // ══════════════ THEME MANAGEMENT ═════════════════════════════════
+        function getPreferredTheme() {
+            const stored = localStorage.getItem('mm-theme');
+            if (stored) return stored;
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            const icon = document.getElementById('themeIcon');
+            if (icon) icon.textContent = theme === 'dark' ? '☀️' : '🌙';
+            // Update charts if they exist
+            if (typeof Charts !== 'undefined' && Charts.applyTheme) {
+                Charts.applyTheme(theme);
+            }
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = current === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('mm-theme', next);
+            applyTheme(next);
+        }
+
+        // Apply theme immediately (before DOM renders)
+        applyTheme(getPreferredTheme());
+
+        // Listen for OS theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!localStorage.getItem('mm-theme')) {
+                applyTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+
         let selectedAgentId = null;
         let ws = null;
 
@@ -2539,7 +2807,7 @@ ws.onmessage = (e) => {
                         <p><strong>Status:</strong> <span class="status-badge status-${agent.status}">${agent.status.toUpperCase()}</span></p>
                         <p><strong>Strategy:</strong> <span class="badge-strategy">${agent.strategy ? agent.strategy.replace(/_/g, ' ') : 'default'}</span>
                            <span class="badge-leverage">${(agent.min_leverage || 1)}x–${agent.max_leverage}x</span>
-                           ${(agent.risk_pct_min > 0 || agent.risk_pct_max > 0) ? `<span class="badge-leverage" style="background:#e8f5e9;color:#2e7d32;">Risk ${agent.risk_pct_min || '?'}–${agent.risk_pct_max || '?'}%</span>` : ''}
+                           ${(agent.risk_pct_min > 0 || agent.risk_pct_max > 0) ? `<span class="badge-leverage" style="background:var(--bg-badge-long);color:#2e7d32;">Risk ${agent.risk_pct_min || '?'}–${agent.risk_pct_max || '?'}%</span>` : ''}
                            ${agent.trailing_enabled !== false ? '<span class="badge-trailing" style="font-size:0.75em;">TRAIL ON</span>' : '<span style="font-size:0.75em;background:#ffebee;color:#c62828;padding:2px 6px;border-radius:4px;">TRAIL OFF</span>'}</p>
                         <p><strong>Initial Balance:</strong> $${agent.initial_balance.toFixed(2)}</p>
                         <p><strong>Available Cash:</strong> $${agent.current_balance.toFixed(2)}</p>
@@ -2713,6 +2981,11 @@ ws.onmessage = (e) => {
 
             // Re-apply sort order if active
             if (_positionSortOrder) _applySortToPositionCards();
+
+            // Refresh chart overlay in case the charted coin has a position
+            if (typeof Charts !== 'undefined') {
+                _applyPositionOverlay(Charts.getCurrentCoin());
+            }
         }
 
         // Close a single position
@@ -2898,8 +3171,14 @@ ws.onmessage = (e) => {
                     badge.textContent = `via ${provider}`;
                     const isBinance = provider.includes('Binance');
                     const isWS = provider.includes('WebSocket');
-                    badge.style.background = isWS ? '#e8f5e9' : isBinance ? '#fff3e0' : '#e3f2fd';
-                    badge.style.color = isWS ? '#2e7d32' : isBinance ? '#e65100' : '#1565c0';
+                    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                    if (isDark) {
+                        badge.style.background = isWS ? '#1a3a2a' : isBinance ? '#3a2a1a' : '#1a2a3a';
+                        badge.style.color = isWS ? '#4caf50' : isBinance ? '#ffb74d' : '#64b5f6';
+                    } else {
+                        badge.style.background = isWS ? '#e8f5e9' : isBinance ? '#fff3e0' : '#e3f2fd';
+                        badge.style.color = isWS ? '#2e7d32' : isBinance ? '#e65100' : '#1565c0';
+                    }
                 }
                 
                 const marketPrices = document.getElementById('marketPrices');
@@ -2991,13 +3270,16 @@ ws.onmessage = (e) => {
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // PriceBus Listener: Candlestick Chart — update last candle
+        // PriceBus Listener: Candlestick Chart — update last candle + PnL
         // ══════════════════════════════════════════════════════════════════
         function _onTickUpdateChart({ prices }) {
             if (typeof Charts === 'undefined') return;
             try {
                 const coin = Charts.getCurrentCoin();
-                if (prices[coin]) Charts.updateLastPrice(coin, prices[coin]);
+                if (prices[coin]) {
+                    Charts.updateLastPrice(coin, prices[coin]);
+                    Charts.updatePositionPnL(prices[coin]);
+                }
             } catch (e) { /* silent */ }
         }
 
@@ -3154,6 +3436,33 @@ ws.onmessage = (e) => {
         }
 
         // ══════════════════════════════════════════════════════════════════
+        // Position overlay helper — finds open position for a coinId and
+        // draws Entry/SL/TP lines on the chart.  Called after chart loads.
+        // ══════════════════════════════════════════════════════════════════
+        function _applyPositionOverlay(coinId) {
+            if (typeof Charts === 'undefined') return;
+            // Find position matching this coinId
+            const pos = _lastPortfolio.find(p => {
+                const cid = _symbolToCoinId[p.symbol];
+                return cid === coinId;
+            });
+            if (!pos) {
+                Charts.clearPositionOverlay();
+                return;
+            }
+            Charts.setPositionOverlay({
+                entry: pos.avg_buy_price,
+                sl: pos.stop_loss_price || 0,
+                tp: pos.take_profit_price || 0,
+                isLong: pos.position_type === 'long',
+                amount: pos.amount || 0,
+                margin: pos.margin || 0,
+            });
+            // Initial PnL with current price
+            if (pos.current_price) Charts.updatePositionPnL(pos.current_price);
+        }
+
+        // ══════════════════════════════════════════════════════════════════
         // Navigate to chart — called by price cards and position chart icons
         // Loads the selected coin in the chart and scrolls to it smoothly
         // ══════════════════════════════════════════════════════════════════
@@ -3168,6 +3477,9 @@ ws.onmessage = (e) => {
             } else {
                 Charts.loadOHLC(coinId, Charts.getCurrentDays() || 14);
             }
+
+            // Show Entry/SL/TP overlay if this coin has an open position
+            setTimeout(() => _applyPositionOverlay(coinId), 300);
 
             // Scroll charts section into view
             const chartsSection = document.querySelector('.charts-section');
@@ -3187,6 +3499,8 @@ ws.onmessage = (e) => {
             } else {
                 Charts.loadOHLC(coin, Charts.getCurrentDays() || 14);
             }
+            // Re-apply position overlay after chart reloads
+            setTimeout(() => _applyPositionOverlay(coin), 300);
         }
 
         // Symbol → CoinGecko ID reverse map (for position price matching)
@@ -3516,7 +3830,7 @@ ws.onmessage = (e) => {
                         <span class="${actionClass}" style="font-size:1em;">${d.action_taken.replace(/_/g, ' ').toUpperCase()}</span>
                         ${d.strategy ? `<span class="badge-strategy">${d.strategy.replace(/_/g, ' ')}</span>` : ''}
                     </div>
-                    <div style="font-size:0.85em;color:#888;margin-bottom:14px;">${new Date(d.timestamp).toLocaleString()}</div>
+                    <div style="font-size:0.85em;color:var(--text-tertiary);margin-bottom:14px;">${new Date(d.timestamp).toLocaleString()}</div>
 
                     <div class="dm-section">
                         <div class="dm-section-title">📋 Strategy Reasoning</div>
@@ -4088,7 +4402,7 @@ ws.onmessage = (e) => {
             ];
             grid.innerHTML = m.map(i => `
                 <div class="card" style="text-align:center;padding:14px 10px;"${i.tooltip ? ` title="${i.tooltip}"` : ''}>
-                    <div style="font-size:0.82em;color:#777;margin-bottom:4px;">${i.label}</div>
+                    <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:4px;">${i.label}</div>
                     <div style="font-size:1.4em;font-weight:700;color:${i.color};">${i.value}</div>
                 </div>
             `).join('');
@@ -4115,7 +4429,7 @@ ws.onmessage = (e) => {
                     <td>${t.size ? t.size.toFixed(6) : '—'}</td>
                     <td style="color:${plColor};font-weight:600;">${pl}</td>
                     <td style="color:#f44336;font-size:0.9em;">${fee}</td>
-                    <td style="font-size:0.85em;color:#888;">${t.reason || ''}</td>
+                    <td style="font-size:0.85em;color:var(--text-tertiary);">${t.reason || ''}</td>
                 </tr>`;
             }).join('');
         }
